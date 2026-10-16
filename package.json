@@ -10,14 +10,19 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "npm run build -w @livekit-app/shared && concurrently -k -n shared,server,desktop -c blue,green,magenta \"npm run dev -w @livekit-app/shared\" \"npm run dev -w @livekit-app/server\" \"npm run dev -w @livekit-app/desktop\"",
+    "dev": "npm run build -w @livekit-app/shared && concurrently -k -n shared,server -c blue,green \"npm run dev -w @livekit-app/shared\" \"npm run dev -w @livekit-app/server\"",
     "build": "npm run build -w @livekit-app/shared && npm run build -w @livekit-app/server -w @livekit-app/desktop",
     "typecheck": "npm run build -w @livekit-app/shared && npm run typecheck --workspaces",
-    "lint": "npm run lint --workspaces",
+    "lint": "npm run build -w @livekit-app/shared && npm run lint --workspaces",
     "format": "prettier --write .",
     "infra:up": "docker compose -f infra/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker-compose.yml down",
-    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f"
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f",
+    "dev:desktop": "npm run dev -w @livekit-app/desktop",
+    "db:migrate": "npm run db:migrate -w @livekit-app/server",
+    "db:seed": "npm run db:seed -w @livekit-app/server",
+    "invite:create": "npm run invite:create -w @livekit-app/server --",
+    "postinstall": "npm run build -w @livekit-app/shared"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -30,5 +35,12 @@
     "prettier": "^3.9.10",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.71.2"
+  },
+  "allowScripts": {
+    "@prisma/engines@7.10.1": true,
+    "argon2@0.45.1": true,
+    "better-sqlite3@12.11.1": true,
+    "esbuild@0.28.2": true,
+    "prisma@7.10.1": true
   }
 }

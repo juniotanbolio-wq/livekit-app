@@ -28,21 +28,23 @@ App desktop para Windows (Electron), estilo Discord simplificado: 1 canal de tex
 
 ## Fases
 
-1. Fundação: monorepo, shared, infra LiveKit, esqueleto dos apps
-2. Server auth: Prisma/SQLite, convites, registro, login JWT, seed admin, script de admin
-3. Server canais e tempo real: canais, token LiveKit, Socket.IO com histórico por cursor
-4. Desktop base: login/registro, layout, chat de texto
-5. Voz/vídeo
-6. Compartilhamento de tela com áudio loopback
-7. Modo Espectador
+1. Fundação: monorepo, shared, infra LiveKit, esqueleto dos apps (concluída)
+   1A. Backend: Prisma/SQLite, convites, registro, login JWT, seed, canais, token LiveKit, histórico por cursor, Socket.IO (concluída)
+2. Desktop base: login/registro, layout, chat de texto
+3. Voz/vídeo
+4. Compartilhamento de tela com áudio loopback
+5. Modo Espectador
 
 ## Estrutura e comandos
 
-- `packages/shared`: ESM, compilado com tsc para `dist`; precisa de build antes dos apps (os scripts da raiz já fazem isso)
-- `apps/server`: ESM, `tsx watch` em dev, `tsc` no build; config por env validada com zod em `src/config.ts`, lê `apps/server/.env` se existir
+- `packages/shared`: ESM, compilado com tsc para `dist`; o `postinstall` da raiz e os scripts `dev`/`build`/`typecheck` compilam antes dos apps
+- `apps/server`: ESM; em dev usa `node --watch --import tsx` (o `tsx watch` trava dentro do `concurrently` no Windows); `tsc` no build; config por env validada com zod em `src/config.ts`, lê `apps/server/.env` se existir
+- Prisma 7.10.1 fixo (o `latest` do npm é 8.0.0-rc), adapter `@prisma/adapter-better-sqlite3`, client gerado em `apps/server/src/generated/prisma` (ignorado no git; `prisma generate` roda em dev/build/typecheck), config em `apps/server/prisma.config.ts`
+- npm 11 exige `allowScripts` no `package.json` da raiz para pacotes com install scripts (argon2, better-sqlite3, prisma, esbuild)
+- Rotas: `src/routes`, regras em `src/services`, Socket.IO em `src/realtime/socket.ts`, scripts de seed e convite em `src/scripts`
 - `apps/desktop`: electron-vite; main e preload saem em CJS, renderer em `src/renderer`
 - `infra`: `docker-compose.yml` + `livekit.yaml`; chaves em `infra/.env` (variável `LIVEKIT_KEYS` montada pelo compose)
-- Raiz: `npm run dev | build | typecheck | lint | format | infra:up | infra:down | infra:logs`
+- Raiz: `npm run dev | dev:desktop | build | typecheck | lint | format | db:migrate | db:seed | invite:create | infra:up | infra:down | infra:logs`
 
 ## Regras de código
 
