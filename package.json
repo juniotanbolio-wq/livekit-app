@@ -1,0 +1,34 @@
+{
+  "name": "livekit-app",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "npm run build -w @livekit-app/shared && concurrently -k -n shared,server,desktop -c blue,green,magenta \"npm run dev -w @livekit-app/shared\" \"npm run dev -w @livekit-app/server\" \"npm run dev -w @livekit-app/desktop\"",
+    "build": "npm run build -w @livekit-app/shared && npm run build -w @livekit-app/server -w @livekit-app/desktop",
+    "typecheck": "npm run build -w @livekit-app/shared && npm run typecheck --workspaces",
+    "lint": "npm run lint --workspaces",
+    "format": "prettier --write .",
+    "infra:up": "docker compose -f infra/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker-compose.yml down",
+    "infra:logs": "docker compose -f infra/docker-compose.yml logs -f"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.6.5",
+    "concurrently": "^10.0.6",
+    "eslint": "^10.12.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.13.0",
+    "prettier": "^3.9.10",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.71.2"
+  }
+}
