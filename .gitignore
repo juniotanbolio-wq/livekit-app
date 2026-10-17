@@ -9,6 +9,8 @@ out/
 *.log
 .DS_Store
 Thumbs.db
-apps/server/src/generated/
-.electron-second/
-.electron-third/
+backend/bin/
+backend/server
+backend/*.exe
+frontend/.electron-second/
+frontend/.electron-third/

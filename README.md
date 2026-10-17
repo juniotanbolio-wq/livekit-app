@@ -1,208 +1,42 @@
-# LiveKit App
+# LiveKit App (v2)
 
-App desktop de comunicação em tempo real para um grupo fechado: 1 canal de texto e 7 canais de voz/vídeo, usando LiveKit.
+App desktop de comunicação em tempo real para um grupo fechado (até 15 pessoas, até ~5 transmissões simultâneas), com voz, vídeo e compartilhamento de tela em 1080p60 via LiveKit. Não há chat de texto.
 
-## Requisitos
+Plano e fases: [docs/plano-v2.md](docs/plano-v2.md). Regras do projeto: [CLAUDE.md](CLAUDE.md).
 
-- Windows com Node.js 22 ou mais recente e npm 11
-- Docker Desktop iniciado
+## Estrutura
 
-## Rodar no Windows (PowerShell)
+| Pasta | Conteúdo |
+|---|---|
+| [frontend/](frontend/) | Cliente desktop Windows (Electron + React + TypeScript) |
+| [backend/](backend/) | API em Go (identidade, convites, canais, tokens LiveKit, presença, menções) |
+| [infra/](infra/) | LiveKit, Caddy, Docker Compose e scripts do servidor |
+| [contracts/](contracts/) | `openapi.yaml`, contrato único entre frontend e backend |
+| [docs/](docs/) | Plano, arquitetura, protocolos e guia do servidor |
 
-Na raiz do projeto:
+A v1 (backend Node + Electron + chat) está preservada na tag `v1-node`.
+
+## Pré-requisitos
+
+- Windows, Node.js 22+ e npm
+- Go (versão estável atual)
+- Docker Desktop
+
+## Início rápido
 
 ```powershell
+# Frontend
+cd frontend
 npm install
-Copy-Item infra\.env.example infra\.env
-Copy-Item apps\server\.env.example apps\server\.env
+npm run typecheck; npm run lint; npm run build
+
+# Backend
+cd ..\backend
+go build ./...; go vet ./...; go test ./...
 ```
 
-Edite os dois `.env`:
+Detalhes de cada parte estão no README da respectiva pasta.
 
-- Use o mesmo `LIVEKIT_API_KEY` e o mesmo `LIVEKIT_API_SECRET` nos dois arquivos. O segredo precisa de 32 ou mais caracteres.
-- Em `apps\server\.env`, defina também `JWT_SECRET` (32 ou mais caracteres) e `SEED_ADMIN_PASSWORD`.
+## Estado
 
-Para gerar segredos aleatórios:
-
-```powershell
-node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
-```
-
-Suba o LiveKit:
-
-```powershell
-cd infra
-docker compose up -d
-cd ..
-```
-
-Prepare o banco e suba o server:
-
-```powershell
-npm run db:migrate
-npm run db:seed
-npm run dev
-```
-
-O server fica em `http://localhost:3000` e o LiveKit em `ws://localhost:7880`.
-
-Em outro terminal, abra o app desktop:
-
-```powershell
-npm run dev:desktop
-```
-
-Para testar com dois usuários no mesmo PC, com o `dev:desktop` rodando, abra uma segunda janela com perfil separado:
-
-```powershell
-npm run dev:second
-```
-
-O app usa `http://localhost:3000` por padrão. Para apontar para outro server, defina a variável antes de abrir:
-
-```powershell
-$env:LIVEKIT_APP_SERVER_URL = "http://192.168.0.10:3000"
-$env:LIVEKIT_APP_LIVEKIT_URL = "ws://192.168.0.10:7880"
-npm run dev:desktop
-```
-
-## Convites
-
-```powershell
-npm run invite:create
-npm run invite:create -- --hours 24
-```
-
-Cada código vale para um único cadastro. A validade padrão vem de `INVITE_TTL_HOURS`.
-
-## Testar com curl
-
-Use `curl.exe`, porque no PowerShell `curl` é um alias de outro comando. Substitua `<CODIGO>`, `<TOKEN>` e `<ID_CANAL_VOZ>`.
-
-```powershell
-curl.exe -X POST http://localhost:3000/api/auth/register -H "Content-Type: application/json" -d '{\"inviteCode\":\"<CODIGO>\",\"username\":\"maria\",\"password\":\"senhasegura1\"}'
-curl.exe -X POST http://localhost:3000/api/auth/login -H "Content-Type: application/json" -d '{\"username\":\"maria\",\"password\":\"senhasegura1\"}'
-curl.exe http://localhost:3000/api/channels -H "Authorization: Bearer <TOKEN>"
-curl.exe -X POST http://localhost:3000/api/livekit/token -H "Content-Type: application/json" -H "Authorization: Bearer <TOKEN>" -d '{\"channelId\":\"<ID_CANAL_VOZ>\",\"role\":\"voice\"}'
-curl.exe "http://localhost:3000/api/channels/<ID_CANAL_TEXTO>/messages?limit=50" -H "Authorization: Bearer <TOKEN>"
-```
-
-## API
-
-| Método | Rota                         | Auth | Descrição                                                                                 |
-| ------ | ---------------------------- | ---- | ----------------------------------------------------------------------------------------- |
-| GET    | `/health`                    | não  | Status do server                                                                          |
-| POST   | `/api/auth/register`         | não  | `{ inviteCode, username, password }` → `{ token, user }`                                  |
-| POST   | `/api/auth/login`            | não  | `{ username, password }` → `{ token, user }`                                              |
-| GET    | `/api/channels`              | sim  | Lista os canais                                                                           |
-| GET    | `/api/channels/:id/messages` | sim  | `?before=<id>&limit=1..100`, do mais novo para o mais antigo → `{ messages, nextCursor }` |
-| POST   | `/api/livekit/token`         | sim  | `{ channelId, role: "voice" \| "spectator" }` → `{ token, url, roomName }`                |
-| GET    | `/api/presence`              | sim  | Quem está em cada canal de voz → `{ channels: [{ channelId, participants }] }`            |
-
-As rotas de auth têm rate limit de 10 requisições a cada 15 minutos por IP.
-
-O Socket.IO fica no mesmo endereço do server e se conecta com `auth: { token }`:
-
-- Para enviar, o cliente emite `message:send` com `{ channelId, content }` e recebe um ack `{ ok, data | error }`.
-- Toda mensagem nova é entregue no evento `message:new`.
-
-## Scripts
-
-Na raiz: `dev`, `dev:desktop`, `dev:second`, `build`, `typecheck`, `lint`, `format`, `db:migrate`, `db:seed`, `invite:create`, `infra:up`, `infra:down` e `infra:logs`.
-
-## Checklist de teste manual
-
-Antes de começar: LiveKit no ar, `npm run dev` e `npm run dev:desktop` rodando, e dois convites criados com `npm run invite:create`.
-
-**Cadastro**
-
-- [ ] Clicar em "Cadastrar" com os campos vazios mostra o erro de cada campo
-- [ ] Um código de convite errado mostra "Código de convite inválido, expirado ou já utilizado"
-- [ ] Senhas diferentes mostram "As senhas não conferem"
-- [ ] Um convite válido cadastra e abre o app no `#geral`
-- [ ] Reusar o mesmo convite em outra conta mostra erro
-
-**Login**
-
-- [ ] Uma senha errada mostra "Usuário ou senha incorretos"
-- [ ] O login correto abre o app
-- [ ] Fechar e reabrir a janela entra direto, sem pedir senha
-- [ ] "Sair da conta" volta para o login, e ao reabrir o app ele pede login de novo
-
-**Chat entre duas instâncias** (rode `npm run dev:second` e entre com o segundo usuário)
-
-- [ ] Uma mensagem enviada com Enter aparece na outra janela na hora
-- [ ] Shift+Enter quebra linha sem enviar
-- [ ] Rolar para cima carrega o histórico antigo sem pular a posição
-- [ ] Rolado para cima, uma mensagem nova não puxa a tela para baixo
-- [ ] No fim da lista, uma mensagem nova rola automaticamente
-- [ ] Acima de 1800 caracteres aparece o contador; acima de 2000, o envio é bloqueado
-
-**Voz entre duas instâncias**
-
-- [ ] Clicar em "Voz 1" nas duas janelas: as duas entram, cada uma se ouve na outra e a grade mostra 2 participantes
-- [ ] Quem fala ganha borda verde na grade e no avatar da sidebar
-- [ ] Mutar o microfone mostra o ícone de mudo na outra janela
-- [ ] "Silenciar áudio" deixa de tocar os outros e muta o próprio microfone; desfazer restaura o estado anterior
-- [ ] Ligar a câmera faz o vídeo aparecer na outra janela
-- [ ] A outra janela, sem entrar no canal, vê os nomes na sidebar em até 5 segundos
-- [ ] Ir para `#geral` durante a chamada mantém a voz e o indicador "Voz conectada"; clicar nele volta para a grade
-- [ ] Trocar de "Voz 1" para "Voz 2" sai de um e entra no outro
-
-**Troca de dispositivos** (engrenagem no painel do usuário)
-
-- [ ] As listas de microfone, saída e câmera aparecem com nomes reais
-- [ ] Trocar o microfone durante a chamada passa a usar o novo, sem cair
-- [ ] Trocar a saída de áudio passa a tocar no novo dispositivo
-- [ ] Trocar a câmera com ela ligada troca o vídeo
-- [ ] A escolha continua salva ao reabrir o app
-
-**Reconexão**
-
-- [ ] Derrubar o server (Ctrl+C no `npm run dev`) mostra "Reconectando..." no chat e preserva o texto digitado
-- [ ] Ao subir o server de novo, o chat volta sozinho e mensagens novas chegam
-- [ ] `docker compose restart livekit` mostra "Reconectando..." na voz e depois volta para "Voz conectada"
-- [ ] `docker compose stop livekit` faz aparecer o aviso de conexão de voz perdida, sem travar o app
-
-## Checklist da Fase 1C: compartilhamento de tela e Modo Espectador
-
-Prepare três instâncias com usuários diferentes: `npm run dev:desktop` (A), `npm run dev:second` (B) e, para testar vários streams, uma terceira (C) aberta com:
-
-```powershell
-npx electron apps/desktop --renderer-url=http://localhost:5173 --user-data-dir=apps/desktop/.electron-third --multi-instance
-```
-
-O painel de depuração abre e fecha com **Ctrl+Shift+D**.
-
-**Compartilhamento (A na Voz 2)**
-
-- [ ] O botão de tela (painel do usuário e barra da chamada) fica desabilitado fora da voz
-- [ ] Na Voz 2, o botão abre o seletor com abas Telas e Janelas, miniaturas e botão de atualizar
-- [ ] O padrão é 1080p 60 fps com H.264 e "Incluir áudio do sistema" desmarcado; ao marcar, o aviso das vozes do canal fica em destaque
-- [ ] Ao compartilhar, o selo "AO VIVO" e "Transmitindo sua tela" aparecem no status da voz, e a grade mostra "Sua tela"
-- [ ] No debug de A (seção Voz), a captura mostra 1920x1080 @ 60 fps, a camada `f` mostra 1920x1080 com ~60 fps, até ~8 Mbps e `video/H264`; as camadas `h` (720p30) e `q` (360p15) também aparecem
-- [ ] Com algo em movimento na tela (vídeo, jogo), o fps da camada `f` fica perto de 60. Com a tela parada, o fps cai: isso é normal na captura do Windows
-- [ ] 1080p 30 fps e 720p 60 fps mudam a captura e as camadas como esperado
-- [ ] Sair da voz ou trocar de canal para a transmissão sozinha
-
-**Espectador (B na voz da Voz 1, assistindo à Voz 2)**
-
-- [ ] Com B na voz da Voz 1, a Voz 2 aparece com "AO VIVO" na sidebar em até ~7 segundos
-- [ ] Clicar na Voz 2 mostra "Entrar na voz" e "Assistir transmissão"; "Assistir" abre o player sem tirar B da Voz 1
-- [ ] B continua ouvindo e falando com a Voz 1 normalmente
-- [ ] **B não ouve ninguém da Voz 2** (peça para A falar no microfone)
-- [ ] No debug de B (seção Espectador), só `screen_share (video)` está com "assinada: sim"; `microphone` e `camera` da Voz 2 aparecem com "não"
-- [ ] O debug de B mostra o stream chegando em 1920x1080 com ~60 fps
-- [ ] A não vê B na Voz 2 (nem na grade nem na sidebar)
-- [ ] Tela cheia (botão ou duplo clique) funciona e Esc sai
-- [ ] Com A transmitindo com áudio do sistema, o botão de fone em B liga o áudio do stream. Só então a `screen_share_audio` aparece assinada. O volume funciona e o "Silenciar áudio" de B corta esse som
-- [ ] "Parar de assistir" fecha o player, e o debug mostra o espectador "sem conexão"
-
-**Casos de borda**
-
-- [ ] B assiste a uma tela da própria sala de voz (clique na tela compartilhada da grade): o player abre "pela sua conexão de voz" e o debug mostra o espectador "sem conexão"
-- [ ] B assiste à Voz 2 e clica em "Entrar na voz": o player continua, agora pela voz, e o espectador fecha
-- [ ] B sai da voz da Voz 2 enquanto assiste: o player continua em "modo espectador"
-- [ ] Com A e C compartilhando na Voz 2, o seletor "Tela de ..." aparece; trocar o stream move a assinatura no debug (uma `screen_share` com "sim", a outra com "não")
-- [ ] Quando o stream assistido termina, o player troca para outro stream do canal; sem nenhum, mostra "Nenhuma transmissão ativa neste canal"
-- [ ] Assistir a outro canal fecha a conexão de espectador anterior (um canal por vez)
+Fase R0 (reestruturação) concluída. O app fica sem backend funcional até a fase R2.

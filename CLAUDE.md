@@ -1,119 +1,60 @@
-# Projeto: app de comunicação em tempo real com LiveKit (grupo fechado, até 15 pessoas)
+# CLAUDE.md
 
-## Visão
+## Projeto
+App desktop de comunicação em tempo real para um grupo fechado (até 15 pessoas, até ~5 transmissões simultâneas).
+Prioridade máxima: áudio e vídeo com qualidade e baixa latência, com compartilhamento de tela em 1080p a 60 fps.
+Não há chat de texto. Existe a função "chamar atenção" (menção a um usuário).
+Plano completo, fases e critérios de aceite: `docs/plano-v2.md`.
 
-App desktop para Windows (Electron), estilo Discord simplificado: 1 canal de texto persistente e 7 canais de voz/vídeo, com Modo Espectador Multicanal e compartilhamento de tela 1080p60 com áudio. Backend e servidor de mídia em servidor próprio na internet.
+## Estrutura do repositório
+- `frontend/`: cliente desktop Windows (Electron + React + TypeScript). Vira um `.exe`. Não contém segredos. O endereço do servidor é configurado na tela.
+- `backend/`: API em Go. Identidade, convites, canais, tokens LiveKit, presença em tempo real, menções. Futuro: agenda.
+- `infra/`: LiveKit Server (SFU de mídia), Caddy (TLS), Docker Compose e scripts para o servidor Ubuntu LTS na rede de casa.
+- `contracts/`: `openapi.yaml`, contrato único entre frontend e backend. Tipos são gerados a partir dele, nunca escritos à mão nos dois lados.
+- `docs/`: arquitetura, protocolos, guia do servidor e plano.
+- Todo diretório principal tem um `README.md` curto: o que é, como rodar, o que contém.
+
+## Fluxos
+- Mídia: cliente <-> LiveKit via WebRTC (UDP 7882; reserva TCP 7881 e TURN). O backend nunca toca na mídia.
+- Controle: cliente <-> backend via HTTPS (REST) e WSS (eventos de presença e menções).
+- LiveKit -> backend via webhooks assinados (presença e quem está transmitindo).
+- Caddy na porta 443 faz TLS para o backend e para a sinalização do LiveKit.
 
 ## Stack
+- Backend: Go (versão estável atual), `net/http` da biblioteca padrão, `oapi-codegen`, SQLite com `modernc.org/sqlite` (sem cgo), `sqlc`, `goose` (migrações), `livekit/server-sdk-go/v2`, `coder/websocket`, `golang-jwt/jwt/v5`, argon2id (`golang.org/x/crypto`), `log/slog`, `golangci-lint`.
+- Frontend: Electron + electron-vite, React, TypeScript estrito, Tailwind, `livekit-client`, `@livekit/components-react`, Zustand, `openapi-typescript` + `openapi-fetch`, `electron-builder` (exe portátil e instalador NSIS).
+- Infra: Ubuntu Server LTS, Docker Compose, LiveKit, Caddy, ufw.
 
-- Monorepo com npm workspaces: apps/server, apps/desktop, packages/shared (tipos e schemas zod), infra
-- TypeScript estrito em tudo
-- Server: Node.js LTS, Express, livekit-server-sdk, Prisma + SQLite, Socket.IO, zod, argon2, jsonwebtoken, helmet, express-rate-limit
-- Desktop: Electron + electron-vite, React, Tailwind CSS, @livekit/components-react, livekit-client, Zustand
-- Mídia: LiveKit Server via Docker Compose. Dev local no Windows com Docker Desktop; produção em VPS Linux própria
-
-## Decisões de arquitetura
-
-- 1 sala LiveKit por canal de voz/vídeo. O texto fica fora do LiveKit: Socket.IO para tempo real + SQLite para histórico (paginação por cursor, limite de 2000 caracteres por mensagem)
-- Cadastro: código de convite de uso único com expiração, gerado por script de admin. Registro com código + usuário + senha (argon2). Login retorna JWT. Primeiro admin criado por seed
-- Os 8 canais são fixos e criados por seed
-- Token LiveKit: endpoint autenticado que recebe channelId e role
-  - voice: publica e assina áudio/vídeo
-  - spectator: hidden, sem publicar, o cliente usa autoSubscribe false e assina só a trilha de vídeo da tela compartilhada
-- Modo Espectador: o cliente mantém duas conexões Room simultâneas (voz no canal X, espectador no canal Y)
-- Tela: captura 1920x1080 a 60fps, maxBitrate ~8 Mbps, contentHint motion, simulcast
-- Áudio: primeiro loopback do sistema via Electron. Captura por aplicativo (WASAPI process loopback com módulo nativo) fica para fase futura
-- livekit.yaml com tcp_port 7881 e udp_port único (mux) para simplificar Docker no Windows
-- Deploy público (domínio, TLS com Caddy, TURN) fica para fase futura; configuração sempre por variáveis de ambiente
-
-## Fases
-
-1. Fundação: monorepo, shared, infra LiveKit, esqueleto dos apps (concluída)
-   1A. Backend: Prisma/SQLite, convites, registro, login JWT, seed, canais, token LiveKit, histórico por cursor, Socket.IO (concluída)
-   1B. Desktop: login/registro, layout, chat persistente, voz/vídeo, presença (concluída)
-   1C. Compartilhamento de tela 1080p60 com áudio do sistema opcional e Modo Espectador Multicanal (concluída)
-2. Captura de áudio por aplicativo (WASAPI process loopback com módulo nativo, excluindo o próprio app)
-3. Instalador e deploy público (domínio, TLS com Caddy, TURN)
-
-## Estado atual
-
-### Comandos (raiz, PowerShell)
-
-- `docker compose up -d` dentro de `infra` (ou `npm run infra:up`): sobe o LiveKit
-- `npm run db:migrate`, `npm run db:seed`, `npm run invite:create [-- --hours N]`
-- `npm run dev`: shared em watch + server; `npm run dev:desktop`: Vite + Electron; `npm run dev:second`: segunda janela (exige o `dev:desktop` rodando; perfil em `apps/desktop/.electron-second`, sem trava de instância única)
-- `npm run typecheck | lint | build | format`
-
-### Portas
-
-- 3000 server HTTP + Socket.IO; 5173 Vite do renderer (fixa, `strictPort`)
-- 7880 LiveKit HTTP/WS; 7881 TCP do RTC; 7882 UDP (mux)
-
-### Endpoints
-
-- `GET /health`
-- `POST /api/auth/register`, `POST /api/auth/login` (rate limit 10/15min por IP)
-- `GET /api/channels`, `GET /api/channels/:id/messages?before=&limit=` (do mais novo ao mais antigo, `nextCursor`)
-- `POST /api/livekit/token` `{ channelId, role: voice|spectator }` → `{ token, url: LIVEKIT_PUBLIC_URL, roomName }`
-- `GET /api/presence` → `{ channels: [{ channelId, participants: [{ userId, username, isScreenSharing }] }] }`, ignora `hidden` e identidades `#spectator`, cache `PRESENCE_CACHE_MS`, 503 se o LiveKit cair
-- Socket.IO com `auth: { token }`: `message:send` (ack `{ ok, data | error }`) e `message:new`; todos entram nas salas dos canais de texto
-
-### Variáveis de ambiente
-
-- `apps/server/.env`: `NODE_ENV`, `HOST`, `PORT`, `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `CORS_ORIGINS` (dev: `http://localhost:5173,http://127.0.0.1:5173,app://desktop`), `LIVEKIT_URL` (interna, `http://`), `LIVEKIT_PUBLIC_URL` (para clientes, `ws://`), `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_TOKEN_TTL`, `PRESENCE_CACHE_MS`, `INVITE_TTL_HOURS`, `SEED_ADMIN_USERNAME`, `SEED_ADMIN_PASSWORD`
-- `infra/.env`: `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` (iguais aos do server), `LIVEKIT_NODE_IP` (IP anunciado; `127.0.0.1` só serve para clientes na mesma máquina)
-- Desktop (processo main, lidas ao abrir): `LIVEKIT_APP_SERVER_URL` (padrão `http://localhost:3000`) e `LIVEKIT_APP_LIVEKIT_URL` (padrão `ws://localhost:7880`, usada na CSP)
-
-### Decisões do desktop
-
-- Main: `contextIsolation`, `sandbox`, sem `nodeIntegration`; CSP por cabeçalho (`security.ts`) com `connect-src` só para server e LiveKit; em dev libera `'unsafe-inline'` em script para o React Refresh; em produção o renderer é servido por `app://desktop` (`protocol.handle`)
-- Permissões: só `media`, `speaker-selection`, `display-capture` e `fullscreen` para a origem do app; navegação, redirect, webview e `window.open` bloqueados
-- Sessão `{ token, user }` cifrada com `safeStorage` em `userData/session.bin`; IPC tipado (`src/shared/desktop-api.ts`) com remetente verificado e payload validado com zod; argumentos `--user-data-dir=`, `--multi-instance` e `--renderer-url=` (este só fora do app empacotado)
-- Renderer: stores Zustand em `src/renderer/src/stores` (session, channels, chat, presence, voice); `lib/api.ts` valida respostas com os schemas do shared e um 401 volta para o login; `lib/realtime.ts` cuida do Socket.IO, com reconexão e ressincronização do histórico
-- Voz: um único `Room` criado no `VoiceProvider` (acima das telas) com `RoomContext` e `RoomAudioRenderer`; a área central só lê o estado, então trocar de tela ou de canal visualizado não derruba a voz. Deafen silencia a saída e muta o mic, restaurando ao voltar
-- Dispositivos (mic, câmera, saída) ficam salvos em `localStorage` e são aplicados com `switchActiveDevice`; a listagem é feita por tipo, para a falta de câmera não esconder os microfones
-- Em dev, reiniciar o `npm run dev` da raiz recompila o shared e faz o Vite recarregar o renderer (a voz cai); para reiniciar só o server use `npm run dev -w @livekit-app/server`
-
-### Compartilhamento de tela (`src/main/screen-capture.ts`, `stores/screen-share.ts`)
-
-- Main: IPC `screen:list-sources` (`desktopCapturer`, miniaturas JPEG 320x180, sem as janelas do próprio processo) e `screen:select-source { sourceId, includeAudio }`, que guarda uma escolha pendente por 10s; `setDisplayMediaRequestHandler` só atende a origem do app e consome essa escolha, com `audio: 'loopback'` só no Windows e só se pedido
-- Renderer: o seletor próprio (`features/screen/ScreenSharePicker.tsx`) chama `getDisplayMedia` com largura, altura e fps máximos do preset, aplica `contentHint = 'motion'` e publica com `degradationPreference: 'maintain-framerate'`
-- Presets (`lib/screen-presets.ts`): 1080p60 (padrão, 8 Mbps; camadas 720p30 2,5 Mbps e 360p15 0,6 Mbps), 1080p30 (5 Mbps) e 720p60 (5 Mbps). H.264 (padrão) e VP8 usam simulcast; VP9 e AV1 usam SVC `L1T3` (uma camada espacial, três temporais)
-- Qualidade e codec ficam salvos em `localStorage` (`screen.settings`); o áudio do sistema sempre começa desligado e o seletor avisa que ele inclui as vozes do canal
-- O compartilhamento para sozinho ao sair da voz, ao trocar de canal, ao desconectar, ao fechar a janela capturada (`ended`) e no logout
-- Medido neste PC (monitor 1920x1080): captura 1920x1080 a 60 fps; camada `f` ~58 fps e ~8 Mbps em H.264 com OpenH264 (software); VP9 SVC ~58 fps e ~8 Mbps com libvpx. A captura do Windows só entrega quadros quando a tela muda: tela parada dá fps e bitrate baixos
-
-### Modo Espectador (`voice/SpectatorProvider.tsx`, `stores/watch.ts`, `voice/spectator-subscriptions.ts`)
-
-- Segundo `Room` na raiz, com `adaptiveStream: false` e `dynacast: false`, conectado com token role `spectator` e `autoSubscribe: false`
-- `applySpectatorSubscriptions` assina só a `screen_share` (vídeo) do stream escolhido, mais a `screen_share_audio` dele se o áudio estiver ligado; todo o resto fica desassinado. Pede `VideoQuality.HIGH` e usa `setEnabled` para pausar o vídeo quando o player não está na tela. Em `TrackSubscribed`, qualquer fonte não permitida é desassinada com aviso no console
-- `reconcile()`: no máximo um canal assistido. Se o canal assistido é o da voz, a conexão de espectador fecha e o player usa o `Room` de voz; entrar na voz do canal assistido encerra o espectador; sair dessa voz volta ao espectador sem parar a transmissão
-- O áudio do stream começa desligado, com volume salvo em `localStorage` (`watch.volume`); o deafen pausa esse áudio no servidor (`setEnabled(false)` do `AudioTrack`)
-- Pela sala de voz o `adaptiveStream` decide a camada: player de ~1000 px recebe 720p30 e tela cheia recebe 1080p; com a janela oculta o vídeo pausa. O espectador sempre recebe a camada mais alta
-- UI: selo "AO VIVO" na sidebar (presença, ou dados ao vivo da própria sala de voz); clicar num canal de voz sem estar nele mostra "Entrar na voz" e "Assistir transmissão" (só entra direto se você não estiver em voz e o canal não estiver ao vivo); `StreamView` com seletor de stream, áudio + volume, tela cheia, entrar na voz e parar de assistir; `WatchStatus` na sidebar
-- Depuração: Ctrl+Shift+D abre `features/debug/DebugPanel.tsx`, que mostra para voz e espectador o estado, as publicações remotas com "assinada sim/não", a captura real, as camadas enviadas (resolução, fps, bitrate, codec, encoder, limitação) e o que chega de cada stream (`lib/rtc-stats.ts`)
-
-## Estrutura e comandos
-
-- `packages/shared`: ESM, compilado com tsc para `dist`; o `postinstall` da raiz e os scripts `dev`/`build`/`typecheck` compilam antes dos apps
-- `apps/server`: ESM; em dev usa `node --watch --import tsx` (o `tsx watch` trava dentro do `concurrently` no Windows); `tsc` no build; config por env validada com zod em `src/config.ts`, lê `apps/server/.env` se existir
-- Prisma 7.10.1 fixo (o `latest` do npm é 8.0.0-rc), adapter `@prisma/adapter-better-sqlite3`, client gerado em `apps/server/src/generated/prisma` (ignorado no git; `prisma generate` roda em dev/build/typecheck), config em `apps/server/prisma.config.ts`
-- npm 11 exige `allowScripts` no `package.json` da raiz para pacotes com install scripts (argon2, better-sqlite3, prisma, esbuild)
-- Rotas: `src/routes`, regras em `src/services`, Socket.IO em `src/realtime/socket.ts`, scripts de seed e convite em `src/scripts`
-- `apps/desktop`: electron-vite; main e preload saem em CJS, renderer em `src/renderer`, tipos compartilhados main/preload/renderer em `src/shared`
-- `infra`: `docker-compose.yml` + `livekit.yaml`; chaves em `infra/.env` (variável `LIVEKIT_KEYS` montada pelo compose)
-- Raiz: `npm run dev | dev:desktop | dev:second | build | typecheck | lint | format | db:migrate | db:seed | invite:create | infra:up | infra:down | infra:logs`
+## Decisões de mídia (não mudar sem discutir comigo)
+- WebRTC via LiveKit. O SFU repassa os pacotes, não recodifica.
+- 1 sala LiveKit por canal de voz (7 canais).
+- Modo Espectador: segunda conexão com identidade `<id>#spectator`, hidden, sem publicar, `autoSubscribe: false`, assinando só o vídeo de screen share do canal assistido. Nunca assinar microfone ou câmera desse canal.
+- Tela: 1080p60, ~6 a 10 Mbps, `contentHint: motion`, `degradationPreference: maintain-framerate`. Simulcast para H.264/VP8; SVC L1T3 para VP9/AV1.
+- Codificador por hardware é prioridade: medir `encoderImplementation` nas estatísticas WebRTC e preferir o codec com aceleração da GPU, com fallback.
+- Voz: Opus com DTX, cancelamento de eco e supressão de ruído. Áudio do stream: Opus estéreo ~128 kbps, opcional para o espectador.
+- Loopback de áudio do sistema desligado por padrão. Captura por aplicativo é fase futura.
+- Sem FTP. UDP apenas através do WebRTC.
 
 ## Regras de código
-
-- NÃO escrever comentários no código
-- Sem placeholders, sem "resto do código aqui"; arquivos completos
-- Validar entradas com zod nas bordas; tratar erros; nunca commitar .env (manter .env.example)
-- Scripts npm em todos os workspaces: dev, build, typecheck, lint
+- Comentários em português explicando o porquê, não o óbvio. Obrigatórios em: mídia, rede, permissões de token, concorrência em Go e segurança do Electron.
+- Arquivos completos, sem placeholders. Erros sempre tratados.
+- Segredos só em `.env` (nunca commitar). Manter `.env.example` atualizado.
+- Backend: `context.Context` em toda chamada externa, timeouts no `http.Server`, nenhuma goroutine vazada, testes com `go test -race`.
+- Frontend: manter contextIsolation, nodeIntegration desligado, CSP estrita e sessão cifrada com safeStorage.
 
 ## Regras de trabalho
+- Uma fase por vez, conforme `docs/plano-v2.md`. Não adicionar escopo fora da fase.
+- Antes de codar, apresentar um plano curto e esperar aprovação.
+- Ao terminar: build, lint e testes; relatório com o que passou, o que falhou e as suposições; atualizar "Estado atual" abaixo; commit.
+- Respostas e mensagens de commit em português.
+- Ambiente de desenvolvimento: Windows + VS Code + GitHub (repositório privado). Servidor: Ubuntu LTS na rede de casa. Comandos no servidor são executados pelo usuário via SSH; gerar scripts e guias para isso.
 
-- Antes de cada fase, apresentar plano curto e esperar aprovação
-- Não adicionar escopo fora da fase pedida
-- Ao terminar: rodar typecheck e build, relatar resultado e listar suposições feitas
-- Respostas e mensagens de commit em português
+## Estado atual
+Atualizar ao fim de cada fase: comandos, portas, endpoints, variáveis de ambiente e decisões tomadas.
+- R0 concluída. v1 (backend Node + Electron + chat) preservada na tag `v1-node`; trabalho na branch `v2`.
+- Frontend é um projeto npm independente (sem workspace na raiz). Comandos em `frontend/`: `npm install`, `npm run dev`, `npm run typecheck`, `npm run lint`, `npm run build`.
+- Chat e Socket.IO removidos. Canais agora são só de voz. Presença segue por polling de 5 s até a R1b/R2 (sem backend funcional até lá). Tipos provisórios em `frontend/src/api/types.ts` (substituídos pelo OpenAPI na R2).
+- Backend (`backend/`): módulo Go `livekit-app/backend`, esqueleto com `GET /health` na porta 8080. Variáveis: `HTTP_ADDR` (:8080), `LOG_LEVEL` (info), `DATABASE_PATH` (data/app.db). Comandos: `go build ./...`, `go vet ./...`, `go test -race ./...`, `golangci-lint run`, `docker build`.
+- `go test -race` exige cgo; no Windows sem gcc, rodar via Docker (`golang:1.27`), ver `backend/README.md`.
+- LiveKit local: `infra/docker-compose.yml` (portas 7880, 7881/TCP, 7882/UDP).
+- Próxima fase: R1a (backend Go, base e identidade).

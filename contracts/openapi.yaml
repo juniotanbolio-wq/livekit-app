@@ -1,0 +1,6 @@
+openapi: 3.1.0
+info:
+  title: LiveKit App API
+  version: 0.0.0
+  description: Marcador da fase R0. As rotas reais entram na fase R1a.
+paths: {}
