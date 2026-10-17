@@ -1,4 +1,5 @@
-﻿# Aceite das fases R1a e R1b contra o backend REAL (imagem de produção, em contêiner) e o LiveKit REAL.
+#Requires -Version 7.0
+# Aceite das fases R1a e R1b contra o backend REAL (imagem de produção, em contêiner) e o LiveKit REAL.
 #
 # R1a: convite -> cadastro -> login -> canais -> token LiveKit, com os tokens validados pelo LiveKit (/rtc/validate).
 # R1b: tempo real. Participantes de verdade (um "bot" com a server-sdk-go, que entra nas salas com tokens emitidos
@@ -8,7 +9,7 @@
 # Não mexe no seu ambiente de desenvolvimento: usa contêineres, rede e volume descartáveis com nomes próprios e
 # portas só em 127.0.0.1 (LiveKit em 17880, backend em 18080). Tudo é removido no final.
 #
-# Uso: powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1
+# Uso: pwsh -NoProfile -File scripts\e2e.ps1
 . "$PSScriptRoot\_docker.ps1"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 Add-Type -AssemblyName System.Net.Http
@@ -29,8 +30,13 @@ $tempRoot = [System.IO.Path]::GetTempPath()
 $botDir = Join-Path $tempRoot "livekit-e2e-bot-$suffix"
 $lkConfig = Join-Path $tempRoot "livekit-e2e-$suffix.yaml"
 
-# Segredos aleatórios só desta execução (32+ caracteres, como o backend exige).
-function New-Secret { -join ((48..57) + (65..90) + (97..122) | Get-Random -Count 40 | ForEach-Object { [char]$_ }) }
+# Segredos só desta execução, do gerador criptográfico do .NET (Get-Random não é: é previsível, e o
+# `-Count` ainda sorteava sem repetição). 48 caracteres hex = 192 bits, acima dos 32 que o backend exige.
+function New-Secret {
+    $secret = [System.Security.Cryptography.RandomNumberGenerator]::GetHexString(48, $true)
+    if ($secret.Length -ne 48 -or $secret -match '^(.)\1+$') { throw 'gerador de segredos devolveu valor inválido' }
+    $secret
+}
 $jwtSecret = New-Secret
 $lkSecret = New-Secret
 $lkKey = 'e2ekey'
@@ -47,8 +53,8 @@ function Check {
     else { $script:failed++; Write-Host "  FALHOU  $Name $Detail" -ForegroundColor Red }
 }
 
-# HttpClient em vez de Invoke-RestMethod: o Windows PowerShell 5.1 lança exceção em qualquer 4xx/5xx,
-# e aqui os códigos de erro são justamente o que queremos conferir.
+# HttpClient em vez de Invoke-RestMethod: o cmdlet lança exceção em qualquer 4xx/5xx (sem
+# -SkipHttpErrorCheck), e aqui os códigos de erro são justamente o que queremos conferir.
 $http = New-Object System.Net.Http.HttpClient
 $http.Timeout = [TimeSpan]::FromSeconds(15)
 function Invoke-Api {
@@ -101,7 +107,7 @@ function Invoke-Webhook {
     [int]($http.SendAsync($request).GetAwaiter().GetResult().StatusCode)
 }
 
-# --- Cliente WebSocket de teste (System.Net.WebSockets, nativo no PowerShell 5.1) ---
+# --- Cliente WebSocket de teste (System.Net.WebSockets.ClientWebSocket do .NET) ---
 # Uma ReceiveAsync fica "pendente" entre leituras: esperar com timeout NÃO pode cancelar a leitura, porque
 # cancelar um ReceiveAsync aborta o socket inteiro.
 function New-Ws {
@@ -268,8 +274,8 @@ function New-TestUser {
     [pscustomobject]@{ Name = $Name; Id = $r.Body.user.id; Session = $r.Body.token }
 }
 
-# Logs de um contêiner (stdout + stderr) como texto. Com $ErrorActionPreference = 'Stop', o PowerShell 5.1
-# transforma cada linha de stderr de um programa nativo em exceção; por isso o 'Continue' local.
+# Logs de um contêiner (stdout + stderr) como texto. O 'Continue' local garante que linhas de stderr do
+# docker (onde ficam os logs do backend) nunca virem exceção com $ErrorActionPreference = 'Stop'.
 function Get-ContainerLog {
     param([string]$Name, [int]$Tail = 0)
     $previous = $ErrorActionPreference

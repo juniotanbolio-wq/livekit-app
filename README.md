@@ -19,6 +19,7 @@ A v1 (backend Node + Electron + chat) está preservada na tag `v1-node`.
 ## Pré-requisitos
 
 - Windows, Node.js 22+ e npm
+- PowerShell 7 (`pwsh`), usado pelos scripts do backend e pelo aceite do frontend
 - Docker Desktop (o backend em Go compila, testa e passa por lint **em contêiner**: não é preciso instalar Go, gcc nem golangci-lint)
 
 ## Início rápido
@@ -38,8 +39,8 @@ npm run e2e          # aceite com duas instâncias reais do app
 
 # Backend (tudo via Docker)
 cd ..\backend
-powershell -ExecutionPolicy Bypass -File scripts\check.ps1   # generate, build, vet, test -race, lint
-powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1     # aceite com backend e LiveKit reais
+pwsh -NoProfile -File scripts\check.ps1   # generate, build, vet, test -race, lint
+pwsh -NoProfile -File scripts\e2e.ps1     # aceite com backend e LiveKit reais
 ```
 
 Detalhes de cada parte estão no README da respectiva pasta.

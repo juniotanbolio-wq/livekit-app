@@ -1,4 +1,5 @@
-﻿# Verificação completa do backend, tudo em contêiner:
+#Requires -Version 7.0
+# Verificação completa do backend, tudo em contêiner:
 #   1. generate (e falha se o código gerado commitado estiver desatualizado em relação ao contrato/SQL)
 #   2. go build, go vet
 #   3. go test -race

@@ -247,7 +247,7 @@ function postWindowClose(app) {
     `Add-Type -Name Win -Namespace E2e -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'`,
     'if (-not [E2e.Win]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { exit 3 }',
   ].join('; ');
-  execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+  execFileSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], {
     stdio: 'ignore',
   });
 }
@@ -256,7 +256,7 @@ function postWindowClose(app) {
 // Chromium sempre informa "visible".) MainWindowHandle só aponta para janelas visíveis.
 function windowVisible(app) {
   const out = execFileSync(
-    'powershell',
+    'pwsh',
     [
       '-NoProfile',
       '-NonInteractive',

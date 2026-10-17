@@ -8,11 +8,11 @@ O contrato é [../contracts/openapi.yaml](../contracts/openapi.yaml); o servidor
 
 Esta máquina não tem Go, gcc nem golangci-lint, e nada disso precisa ser instalado: todos os comandos rodam em contêiner pelos scripts de [scripts/](scripts/). Pré-requisito: Docker Desktop aberto.
 
-Rode a partir de `backend/`. O prefixo `-ExecutionPolicy Bypass` vale só para aquela execução e evita mudar a política do PowerShell da máquina:
+Rode a partir de `backend/`, no **PowerShell 7** (`pwsh`; os scripts exigem 7.0+ com `#Requires`):
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\check.ps1     # tudo: generate, build, vet, test -race, lint
-powershell -ExecutionPolicy Bypass -File scripts\e2e.ps1       # aceite ponta a ponta (backend e LiveKit reais)
+pwsh -NoProfile -File scripts\check.ps1     # tudo: generate, build, vet, test -race, lint
+pwsh -NoProfile -File scripts\e2e.ps1       # aceite ponta a ponta (backend e LiveKit reais)
 ```
 
 | Script | O que faz |
@@ -107,4 +107,4 @@ Binário estático sem cgo (SQLite em Go puro), imagem `distroless` com usuário
 - `internal/realtime/`: hub de conexões WebSocket (autenticação, snapshot, ping/pong, limites) e menções
 - `internal/ratelimit/`: limitador por IP em janela fixa
 - `internal/testutil/`: apoio aos testes
-- `scripts/`: scripts Docker (PowerShell)
+- `scripts/`: scripts Docker (PowerShell 7)

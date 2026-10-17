@@ -1,4 +1,5 @@
-﻿# go test -race em contêiner. A imagem golang:1.27 (Debian) já traz gcc, que o detector de corridas exige.
+#Requires -Version 7.0
+# go test -race em contêiner. A imagem golang:1.27 (Debian) já traz gcc, que o detector de corridas exige.
 # Argumentos extras vão direto ao `go test`, por exemplo: test.ps1 -run TestRegister ./internal/httpapi
 . "$PSScriptRoot\_docker.ps1"
 

@@ -10,7 +10,7 @@
 Mudou o contrato? Regere os dois lados e commite o código gerado:
 
 ```powershell
-cd backend;  powershell -ExecutionPolicy Bypass -File scripts\generate.ps1   # internal/api (Go)
+cd backend;  pwsh -NoProfile -File scripts\generate.ps1   # internal/api (Go)
 cd frontend; npm run generate                                                # src/generated (TypeScript)
 ```
 

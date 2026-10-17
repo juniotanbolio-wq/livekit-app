@@ -1,4 +1,5 @@
-﻿# Funções comuns dos scripts do backend. Não é para ser executado direto: os outros scripts fazem dot-source.
+#Requires -Version 7.0
+# Funções comuns dos scripts do backend. Não é para ser executado direto: os outros scripts fazem dot-source.
 #
 # O Windows de desenvolvimento não tem Go, gcc nem golangci-lint. Tudo roda em contêiner, com o repositório
 # inteiro montado em /repo (o `generate` precisa ler contracts/openapi.yaml, que fica fora de backend/).
