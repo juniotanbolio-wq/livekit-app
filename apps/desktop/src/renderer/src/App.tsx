@@ -4,6 +4,8 @@ import { MainLayout } from './features/layout/MainLayout';
 import { Spinner } from './components/Icons';
 import { useSession } from './stores/session';
 import { VoiceProvider } from './voice/VoiceProvider';
+import { SpectatorProvider } from './voice/SpectatorProvider';
+import { DebugPanel } from './features/debug/DebugPanel';
 
 function Screens() {
   const status = useSession((state) => state.status);
@@ -15,7 +17,14 @@ function Screens() {
       </div>
     );
   }
-  return status === 'authenticated' ? <MainLayout /> : <AuthScreen />;
+  return status === 'authenticated' ? (
+    <>
+      <MainLayout />
+      <DebugPanel />
+    </>
+  ) : (
+    <AuthScreen />
+  );
 }
 
 export function App() {
@@ -25,7 +34,9 @@ export function App() {
 
   return (
     <VoiceProvider>
-      <Screens />
+      <SpectatorProvider>
+        <Screens />
+      </SpectatorProvider>
     </VoiceProvider>
   );
 }

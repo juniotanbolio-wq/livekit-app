@@ -6,6 +6,10 @@ import { usePresence } from '../../stores/presence';
 import { useSession } from '../../stores/session';
 import { ChatView } from '../chat/ChatView';
 import { VoiceView } from '../voice/VoiceView';
+import { ScreenSharePicker } from '../screen/ScreenSharePicker';
+import { StreamView } from '../stream/StreamView';
+import { useScreenShare } from '../../stores/screen-share';
+import { useWatch } from '../../stores/watch';
 import { Sidebar } from './Sidebar';
 import { Spinner } from '../../components/Icons';
 
@@ -38,6 +42,7 @@ function CentralArea() {
   const loading = useChannels((state) => state.loading);
   const error = useChannels((state) => state.error);
   const load = useChannels((state) => state.load);
+  const watchedChannelId = useWatch((state) => state.watchedChannelId);
 
   if (!channel) {
     return (
@@ -60,13 +65,20 @@ function CentralArea() {
     );
   }
 
-  return channel.type === 'text' ? <ChatView channel={channel} /> : <VoiceView channel={channel} />;
+  if (channel.type === 'text') {
+    return <ChatView channel={channel} />;
+  }
+  if (watchedChannelId === channel.id) {
+    return <StreamView channel={channel} />;
+  }
+  return <VoiceView channel={channel} />;
 }
 
 export function MainLayout() {
   const token = useSession((state) => state.token);
   const hasChannels = useChannels((state) => state.channels.length > 0);
   const load = useChannels((state) => state.load);
+  const pickerOpen = useScreenShare((state) => state.pickerOpen);
 
   useRealtimeConnection(token);
   usePresencePolling();
@@ -83,6 +95,7 @@ export function MainLayout() {
       <main className="flex min-w-0 flex-1 flex-col bg-zinc-800">
         <CentralArea />
       </main>
+      {pickerOpen && <ScreenSharePicker />}
     </div>
   );
 }

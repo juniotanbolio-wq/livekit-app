@@ -2,6 +2,7 @@ import { join } from 'node:path';
 import { app, BrowserWindow, dialog } from 'electron';
 import { loadMainConfig, type MainConfig } from './config';
 import { registerIpcHandlers } from './ipc';
+import { registerScreenCapture } from './screen-capture';
 import {
   APP_ORIGIN,
   applySessionSecurity,
@@ -75,6 +76,7 @@ function start(): void {
     registerAppProtocol(join(__dirname, '../renderer'), csp);
     applySessionSecurity(config, csp);
     registerIpcHandlers(config);
+    registerScreenCapture(config);
     mainWindow = createWindow(config);
 
     app.on('activate', () => {

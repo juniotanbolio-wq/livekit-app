@@ -31,9 +31,9 @@ App desktop para Windows (Electron), estilo Discord simplificado: 1 canal de tex
 1. Fundação: monorepo, shared, infra LiveKit, esqueleto dos apps (concluída)
    1A. Backend: Prisma/SQLite, convites, registro, login JWT, seed, canais, token LiveKit, histórico por cursor, Socket.IO (concluída)
    1B. Desktop: login/registro, layout, chat persistente, voz/vídeo, presença (concluída)
-2. Compartilhamento de tela com áudio loopback
-3. Modo Espectador multicanal
-4. Instalador e deploy público
+   1C. Compartilhamento de tela 1080p60 com áudio do sistema opcional e Modo Espectador Multicanal (concluída)
+2. Captura de áudio por aplicativo (WASAPI process loopback com módulo nativo, excluindo o próprio app)
+3. Instalador e deploy público (domínio, TLS com Caddy, TURN)
 
 ## Estado atual
 
@@ -67,12 +67,31 @@ App desktop para Windows (Electron), estilo Discord simplificado: 1 canal de tex
 ### Decisões do desktop
 
 - Main: `contextIsolation`, `sandbox`, sem `nodeIntegration`; CSP por cabeçalho (`security.ts`) com `connect-src` só para server e LiveKit; em dev libera `'unsafe-inline'` em script para o React Refresh; em produção o renderer é servido por `app://desktop` (`protocol.handle`)
-- Permissões: só `media` e `speaker-selection` para a origem do app; navegação, redirect, webview e `window.open` bloqueados
+- Permissões: só `media`, `speaker-selection`, `display-capture` e `fullscreen` para a origem do app; navegação, redirect, webview e `window.open` bloqueados
 - Sessão `{ token, user }` cifrada com `safeStorage` em `userData/session.bin`; IPC tipado (`src/shared/desktop-api.ts`) com remetente verificado e payload validado com zod; argumentos `--user-data-dir=`, `--multi-instance` e `--renderer-url=` (este só fora do app empacotado)
 - Renderer: stores Zustand em `src/renderer/src/stores` (session, channels, chat, presence, voice); `lib/api.ts` valida respostas com os schemas do shared e um 401 volta para o login; `lib/realtime.ts` cuida do Socket.IO, com reconexão e ressincronização do histórico
-- Voz: um único `Room` criado no `VoiceProvider` (acima das telas) com `RoomContext` e `RoomAudioRenderer`; a área central só lê o estado, então trocar de tela ou de canal visualizado não derruba a voz. Clicar num canal de voz já entra nele. Deafen silencia a saída e muta o mic, restaurando ao voltar
+- Voz: um único `Room` criado no `VoiceProvider` (acima das telas) com `RoomContext` e `RoomAudioRenderer`; a área central só lê o estado, então trocar de tela ou de canal visualizado não derruba a voz. Deafen silencia a saída e muta o mic, restaurando ao voltar
 - Dispositivos (mic, câmera, saída) ficam salvos em `localStorage` e são aplicados com `switchActiveDevice`; a listagem é feita por tipo, para a falta de câmera não esconder os microfones
 - Em dev, reiniciar o `npm run dev` da raiz recompila o shared e faz o Vite recarregar o renderer (a voz cai); para reiniciar só o server use `npm run dev -w @livekit-app/server`
+
+### Compartilhamento de tela (`src/main/screen-capture.ts`, `stores/screen-share.ts`)
+
+- Main: IPC `screen:list-sources` (`desktopCapturer`, miniaturas JPEG 320x180, sem as janelas do próprio processo) e `screen:select-source { sourceId, includeAudio }`, que guarda uma escolha pendente por 10s; `setDisplayMediaRequestHandler` só atende a origem do app e consome essa escolha, com `audio: 'loopback'` só no Windows e só se pedido
+- Renderer: o seletor próprio (`features/screen/ScreenSharePicker.tsx`) chama `getDisplayMedia` com largura, altura e fps máximos do preset, aplica `contentHint = 'motion'` e publica com `degradationPreference: 'maintain-framerate'`
+- Presets (`lib/screen-presets.ts`): 1080p60 (padrão, 8 Mbps; camadas 720p30 2,5 Mbps e 360p15 0,6 Mbps), 1080p30 (5 Mbps) e 720p60 (5 Mbps). H.264 (padrão) e VP8 usam simulcast; VP9 e AV1 usam SVC `L1T3` (uma camada espacial, três temporais)
+- Qualidade e codec ficam salvos em `localStorage` (`screen.settings`); o áudio do sistema sempre começa desligado e o seletor avisa que ele inclui as vozes do canal
+- O compartilhamento para sozinho ao sair da voz, ao trocar de canal, ao desconectar, ao fechar a janela capturada (`ended`) e no logout
+- Medido neste PC (monitor 1920x1080): captura 1920x1080 a 60 fps; camada `f` ~58 fps e ~8 Mbps em H.264 com OpenH264 (software); VP9 SVC ~58 fps e ~8 Mbps com libvpx. A captura do Windows só entrega quadros quando a tela muda: tela parada dá fps e bitrate baixos
+
+### Modo Espectador (`voice/SpectatorProvider.tsx`, `stores/watch.ts`, `voice/spectator-subscriptions.ts`)
+
+- Segundo `Room` na raiz, com `adaptiveStream: false` e `dynacast: false`, conectado com token role `spectator` e `autoSubscribe: false`
+- `applySpectatorSubscriptions` assina só a `screen_share` (vídeo) do stream escolhido, mais a `screen_share_audio` dele se o áudio estiver ligado; todo o resto fica desassinado. Pede `VideoQuality.HIGH` e usa `setEnabled` para pausar o vídeo quando o player não está na tela. Em `TrackSubscribed`, qualquer fonte não permitida é desassinada com aviso no console
+- `reconcile()`: no máximo um canal assistido. Se o canal assistido é o da voz, a conexão de espectador fecha e o player usa o `Room` de voz; entrar na voz do canal assistido encerra o espectador; sair dessa voz volta ao espectador sem parar a transmissão
+- O áudio do stream começa desligado, com volume salvo em `localStorage` (`watch.volume`); o deafen pausa esse áudio no servidor (`setEnabled(false)` do `AudioTrack`)
+- Pela sala de voz o `adaptiveStream` decide a camada: player de ~1000 px recebe 720p30 e tela cheia recebe 1080p; com a janela oculta o vídeo pausa. O espectador sempre recebe a camada mais alta
+- UI: selo "AO VIVO" na sidebar (presença, ou dados ao vivo da própria sala de voz); clicar num canal de voz sem estar nele mostra "Entrar na voz" e "Assistir transmissão" (só entra direto se você não estiver em voz e o canal não estiver ao vivo); `StreamView` com seletor de stream, áudio + volume, tela cheia, entrar na voz e parar de assistir; `WatchStatus` na sidebar
+- Depuração: Ctrl+Shift+D abre `features/debug/DebugPanel.tsx`, que mostra para voz e espectador o estado, as publicações remotas com "assinada sim/não", a captura real, as camadas enviadas (resolução, fps, bitrate, codec, encoder, limitação) e o que chega de cada stream (`lib/rtc-stats.ts`)
 
 ## Estrutura e comandos
 

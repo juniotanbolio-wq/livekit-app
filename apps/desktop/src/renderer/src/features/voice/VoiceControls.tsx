@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useVoice } from '../../stores/voice';
+import { useScreenShareToggle } from '../screen/useScreenShareToggle';
 import {
   CameraIcon,
   CameraOffIcon,
@@ -7,6 +8,8 @@ import {
   HeadphonesOffIcon,
   MicIcon,
   MicOffIcon,
+  MonitorIcon,
+  MonitorOffIcon,
   PhoneOffIcon,
 } from '../../components/Icons';
 
@@ -14,27 +17,34 @@ function ControlButton({
   title,
   danger,
   off,
+  live,
+  disabled,
   onClick,
   children,
 }: {
   title: string;
   danger?: boolean;
   off?: boolean;
+  live?: boolean;
+  disabled?: boolean;
   onClick(): void;
   children: ReactNode;
 }) {
-  const color = danger
-    ? 'bg-red-600 hover:bg-red-500 text-white'
-    : off
-      ? 'bg-zinc-100 text-zinc-900 hover:bg-white'
-      : 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600';
+  const color = live
+    ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+    : danger
+      ? 'bg-red-600 hover:bg-red-500 text-white'
+      : off
+        ? 'bg-zinc-100 text-zinc-900 hover:bg-white'
+        : 'bg-zinc-700 text-zinc-100 hover:bg-zinc-600';
   return (
     <button
       type="button"
       title={title}
       aria-label={title}
+      disabled={disabled}
       onClick={onClick}
-      className={`flex h-12 w-12 items-center justify-center rounded-full ${color}`}
+      className={`flex h-12 w-12 items-center justify-center rounded-full disabled:opacity-50 ${color}`}
     >
       {children}
     </button>
@@ -49,6 +59,7 @@ export function VoiceControls() {
   const toggleCamera = useVoice((state) => state.toggleCamera);
   const toggleDeafen = useVoice((state) => state.toggleDeafen);
   const leave = useVoice((state) => state.leave);
+  const screen = useScreenShareToggle();
 
   return (
     <div className="flex shrink-0 items-center justify-center gap-3 bg-zinc-900/60 py-3">
@@ -72,6 +83,14 @@ export function VoiceControls() {
         onClick={() => void toggleDeafen()}
       >
         {deafened ? <HeadphonesOffIcon /> : <HeadphonesIcon />}
+      </ControlButton>
+      <ControlButton
+        title={screen.title}
+        live={screen.live}
+        disabled={screen.disabled}
+        onClick={screen.toggle}
+      >
+        {screen.live ? <MonitorOffIcon /> : <MonitorIcon />}
       </ControlButton>
       <ControlButton title="Sair do canal" danger onClick={() => void leave()}>
         <PhoneOffIcon />

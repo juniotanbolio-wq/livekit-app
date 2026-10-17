@@ -11,3 +11,4 @@ out/
 Thumbs.db
 apps/server/src/generated/
 .electron-second/
+.electron-third/

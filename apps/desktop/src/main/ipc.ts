@@ -7,7 +7,7 @@ import { clearSession, readSession, writeSession } from './session-store';
 
 const sessionValueSchema = z.string().min(1).max(SESSION_MAX_LENGTH);
 
-function assertTrustedSender(event: IpcMainInvokeEvent, config: MainConfig): void {
+export function assertTrustedSender(event: IpcMainInvokeEvent, config: MainConfig): void {
   const url = event.senderFrame?.url;
   if (!url) {
     throw new Error('Remetente IPC desconhecido');

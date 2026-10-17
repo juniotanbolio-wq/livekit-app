@@ -163,3 +163,46 @@ Antes de começar: LiveKit no ar, `npm run dev` e `npm run dev:desktop` rodando,
 - [ ] Ao subir o server de novo, o chat volta sozinho e mensagens novas chegam
 - [ ] `docker compose restart livekit` mostra "Reconectando..." na voz e depois volta para "Voz conectada"
 - [ ] `docker compose stop livekit` faz aparecer o aviso de conexão de voz perdida, sem travar o app
+
+## Checklist da Fase 1C: compartilhamento de tela e Modo Espectador
+
+Prepare três instâncias com usuários diferentes: `npm run dev:desktop` (A), `npm run dev:second` (B) e, para testar vários streams, uma terceira (C) aberta com:
+
+```powershell
+npx electron apps/desktop --renderer-url=http://localhost:5173 --user-data-dir=apps/desktop/.electron-third --multi-instance
+```
+
+O painel de depuração abre e fecha com **Ctrl+Shift+D**.
+
+**Compartilhamento (A na Voz 2)**
+
+- [ ] O botão de tela (painel do usuário e barra da chamada) fica desabilitado fora da voz
+- [ ] Na Voz 2, o botão abre o seletor com abas Telas e Janelas, miniaturas e botão de atualizar
+- [ ] O padrão é 1080p 60 fps com H.264 e "Incluir áudio do sistema" desmarcado; ao marcar, o aviso das vozes do canal fica em destaque
+- [ ] Ao compartilhar, o selo "AO VIVO" e "Transmitindo sua tela" aparecem no status da voz, e a grade mostra "Sua tela"
+- [ ] No debug de A (seção Voz), a captura mostra 1920x1080 @ 60 fps, a camada `f` mostra 1920x1080 com ~60 fps, até ~8 Mbps e `video/H264`; as camadas `h` (720p30) e `q` (360p15) também aparecem
+- [ ] Com algo em movimento na tela (vídeo, jogo), o fps da camada `f` fica perto de 60. Com a tela parada, o fps cai: isso é normal na captura do Windows
+- [ ] 1080p 30 fps e 720p 60 fps mudam a captura e as camadas como esperado
+- [ ] Sair da voz ou trocar de canal para a transmissão sozinha
+
+**Espectador (B na voz da Voz 1, assistindo à Voz 2)**
+
+- [ ] Com B na voz da Voz 1, a Voz 2 aparece com "AO VIVO" na sidebar em até ~7 segundos
+- [ ] Clicar na Voz 2 mostra "Entrar na voz" e "Assistir transmissão"; "Assistir" abre o player sem tirar B da Voz 1
+- [ ] B continua ouvindo e falando com a Voz 1 normalmente
+- [ ] **B não ouve ninguém da Voz 2** (peça para A falar no microfone)
+- [ ] No debug de B (seção Espectador), só `screen_share (video)` está com "assinada: sim"; `microphone` e `camera` da Voz 2 aparecem com "não"
+- [ ] O debug de B mostra o stream chegando em 1920x1080 com ~60 fps
+- [ ] A não vê B na Voz 2 (nem na grade nem na sidebar)
+- [ ] Tela cheia (botão ou duplo clique) funciona e Esc sai
+- [ ] Com A transmitindo com áudio do sistema, o botão de fone em B liga o áudio do stream. Só então a `screen_share_audio` aparece assinada. O volume funciona e o "Silenciar áudio" de B corta esse som
+- [ ] "Parar de assistir" fecha o player, e o debug mostra o espectador "sem conexão"
+
+**Casos de borda**
+
+- [ ] B assiste a uma tela da própria sala de voz (clique na tela compartilhada da grade): o player abre "pela sua conexão de voz" e o debug mostra o espectador "sem conexão"
+- [ ] B assiste à Voz 2 e clica em "Entrar na voz": o player continua, agora pela voz, e o espectador fecha
+- [ ] B sai da voz da Voz 2 enquanto assiste: o player continua em "modo espectador"
+- [ ] Com A e C compartilhando na Voz 2, o seletor "Tela de ..." aparece; trocar o stream move a assinatura no debug (uma `screen_share` com "sim", a outra com "não")
+- [ ] Quando o stream assistido termina, o player troca para outro stream do canal; sem nenhum, mostra "Nenhuma transmissão ativa neste canal"
+- [ ] Assistir a outro canal fecha a conexão de espectador anterior (um canal por vez)

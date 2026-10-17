@@ -1,7 +1,9 @@
 import type { Channel } from '@livekit-app/shared';
 import { usePresence } from '../../stores/presence';
 import { useVoice } from '../../stores/voice';
-import { SpeakerIcon, Spinner, XIcon } from '../../components/Icons';
+import { EyeIcon, LiveBadge, SpeakerIcon, Spinner, XIcon } from '../../components/Icons';
+import { useWatch } from '../../stores/watch';
+import { useLiveChannelIds } from '../stream/useLiveChannels';
 import { VoiceControls } from './VoiceControls';
 import { VoiceGrid } from './VoiceGrid';
 
@@ -28,12 +30,23 @@ function VoiceError() {
 
 function NotConnected({ channel }: { channel: Channel }) {
   const join = useVoice((state) => state.join);
+  const inOtherVoice = useVoice(
+    (state) =>
+      state.connection !== 'idle' && state.channelId !== null && state.channelId !== channel.id,
+  );
+  const watch = useWatch((state) => state.watch);
   const participants = usePresence((state) => state.byChannel[channel.id] ?? []);
+  const live = useLiveChannelIds().has(channel.id);
+  const sharers = participants.filter((participant) => participant.isScreenSharing);
+
   return (
     <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
       <SpeakerIcon size={40} className="text-zinc-500" />
       <div>
-        <h2 className="text-lg font-semibold">{channel.name}</h2>
+        <h2 className="flex items-center justify-center gap-2 text-lg font-semibold">
+          {channel.name}
+          {live && <LiveBadge />}
+        </h2>
         <p className="text-sm text-zinc-400">
           {participants.length === 0
             ? 'Ninguém neste canal ainda'
@@ -41,14 +54,36 @@ function NotConnected({ channel }: { channel: Channel }) {
                 participants.length === 1 ? 'está' : 'estão'
               } aqui`}
         </p>
+        {sharers.length > 0 && (
+          <p className="mt-1 text-sm text-zinc-300">
+            Transmitindo: {sharers.map((participant) => participant.username).join(', ')}
+          </p>
+        )}
+        {inOtherVoice && (
+          <p className="mt-1 text-xs text-zinc-500">
+            Você está na voz de outro canal. Assistir não tira você de lá.
+          </p>
+        )}
       </div>
-      <button
-        type="button"
-        onClick={() => void join(channel.id)}
-        className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-      >
-        Entrar no canal
-      </button>
+      <div className="flex gap-3">
+        <button
+          type="button"
+          onClick={() => void join(channel.id)}
+          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+        >
+          Entrar na voz
+        </button>
+        <button
+          type="button"
+          disabled={!live}
+          title={live ? undefined : 'Não há transmissão ao vivo neste canal'}
+          onClick={() => watch(channel.id)}
+          className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-sky-600"
+        >
+          <EyeIcon size={16} />
+          Assistir transmissão
+        </button>
+      </div>
     </div>
   );
 }
@@ -77,7 +112,7 @@ export function VoiceView({ channel }: { channel: Channel }) {
       )}
       {isThisChannel && (connection === 'connected' || connection === 'reconnecting') && (
         <>
-          <VoiceGrid />
+          <VoiceGrid channelId={channel.id} />
           <VoiceControls />
         </>
       )}

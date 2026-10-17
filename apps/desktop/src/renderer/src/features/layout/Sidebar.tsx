@@ -4,9 +4,18 @@ import type { Channel, PresenceParticipant } from '@livekit-app/shared';
 import { useChannels } from '../../stores/channels';
 import { usePresence } from '../../stores/presence';
 import { useVoice } from '../../stores/voice';
-import { HashIcon, MicOffIcon, MonitorIcon, SpeakerIcon } from '../../components/Icons';
+import {
+  EyeIcon,
+  HashIcon,
+  LiveBadge,
+  MicOffIcon,
+  MonitorIcon,
+  SpeakerIcon,
+} from '../../components/Icons';
+import { useWatch } from '../../stores/watch';
+import { useLiveChannelIds } from '../stream/useLiveChannels';
 import { UserPanel } from './UserPanel';
-import { VoiceStatus } from './VoiceStatus';
+import { VoiceStatus, WatchStatus } from './VoiceStatus';
 
 function Avatar({ name, speaking }: { name: string; speaking: boolean }) {
   return (
@@ -68,16 +77,21 @@ function PresenceParticipants({ participants }: { participants: PresenceParticip
 function ChannelButton({
   channel,
   active,
+  live = false,
+  watching = false,
   onClick,
 }: {
   channel: Channel;
   active: boolean;
+  live?: boolean;
+  watching?: boolean;
   onClick(): void;
 }) {
   const Icon = channel.type === 'text' ? HashIcon : SpeakerIcon;
   return (
     <button
       type="button"
+      data-channel={channel.name}
       onClick={onClick}
       className={`flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm ${
         active ? 'bg-zinc-700 text-white' : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
@@ -85,6 +99,8 @@ function ChannelButton({
     >
       <Icon size={16} className="shrink-0 text-zinc-500" />
       <span className="truncate">{channel.name}</span>
+      {watching && <EyeIcon size={14} className="shrink-0 text-sky-400" />}
+      {live && <LiveBadge className="ml-auto shrink-0" />}
     </button>
   );
 }
@@ -97,13 +113,21 @@ export function Sidebar() {
   const voiceChannelId = useVoice((state) => state.channelId);
   const voiceConnection = useVoice((state) => state.connection);
   const join = useVoice((state) => state.join);
+  const watchedChannelId = useWatch((state) => state.watchedChannelId);
+  const liveChannels = useLiveChannelIds();
 
   const textChannels = channels.filter((channel) => channel.type === 'text');
   const voiceChannels = channels.filter((channel) => channel.type === 'voice');
 
   const openVoice = (channelId: string) => {
     view(channelId);
-    void join(channelId);
+    const inThisVoice = voiceChannelId === channelId && voiceConnection !== 'idle';
+    if (inThisVoice || watchedChannelId === channelId) {
+      return;
+    }
+    if (voiceConnection === 'idle' && !liveChannels.has(channelId)) {
+      void join(channelId);
+    }
   };
 
   return (
@@ -131,15 +155,17 @@ export function Sidebar() {
           </h2>
           <div className="space-y-0.5">
             {voiceChannels.map((channel) => {
-              const isLive = voiceChannelId === channel.id && voiceConnection !== 'idle';
+              const isMine = voiceChannelId === channel.id && voiceConnection !== 'idle';
               return (
                 <div key={channel.id}>
                   <ChannelButton
                     channel={channel}
                     active={viewedChannelId === channel.id}
+                    live={liveChannels.has(channel.id)}
+                    watching={watchedChannelId === channel.id}
                     onClick={() => openVoice(channel.id)}
                   />
-                  {isLive && voiceConnection === 'connected' ? (
+                  {isMine && voiceConnection === 'connected' ? (
                     <LiveParticipants />
                   ) : (
                     <PresenceParticipants participants={presence[channel.id] ?? []} />
@@ -151,6 +177,7 @@ export function Sidebar() {
         </section>
       </nav>
       <VoiceStatus />
+      <WatchStatus />
       <UserPanel />
     </aside>
   );

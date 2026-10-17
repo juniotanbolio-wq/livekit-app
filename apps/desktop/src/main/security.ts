@@ -7,7 +7,12 @@ export const APP_SCHEME = 'app';
 export const APP_HOST = 'desktop';
 export const APP_ORIGIN = `${APP_SCHEME}://${APP_HOST}`;
 
-const ALLOWED_PERMISSIONS = new Set(['media', 'speaker-selection']);
+const ALLOWED_PERMISSIONS = new Set([
+  'media',
+  'speaker-selection',
+  'display-capture',
+  'fullscreen',
+]);
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
