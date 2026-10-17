@@ -31,11 +31,20 @@ type Deps struct {
 	CORSOrigins    []string
 	TrustedProxies []netip.Prefix
 	MaxBodyBytes   int64
+
+	// WebSocket (GET /ws) e Webhook (POST /webhooks/livekit) são opcionais: ficam de fora do contrato
+	// OpenAPI (o validador não os conhece) e são montados ao lado da API. Nulos = rotas inexistentes (404).
+	WebSocket http.Handler
+	Webhook   http.Handler
 }
 
-// NewHandler devolve o handler raiz. Ordem dos middlewares (de fora para dentro):
+// NewHandler devolve o handler raiz. Ordem dos middlewares da API (de fora para dentro):
 // recover → log → CORS → limite de corpo → rate limit de auth → identificação do usuário →
 // validação do contrato (formato do corpo + exigência de Bearer) → rotas geradas.
+//
+// /ws e /webhooks/livekit não passam por essa cadeia: o validador do contrato devolveria 404 para rotas que
+// não estão no OpenAPI, e cada uma tem sua própria autenticação (mensagem de auth no WebSocket; assinatura
+// do LiveKit no webhook) e seus próprios limites.
 func NewHandler(d Deps) (http.Handler, error) {
 	spec, err := api.GetSwagger()
 	if err != nil {
@@ -69,7 +78,7 @@ func NewHandler(d Deps) (http.Handler, error) {
 		SilenceServersWarning: true,
 	})
 
-	return chain(routes,
+	apiHandler := chain(routes,
 		recoverer(d.Logger),
 		accessLog(d.Logger, d.TrustedProxies),
 		cors(d.Logger, d.CORSOrigins),
@@ -77,7 +86,26 @@ func NewHandler(d Deps) (http.Handler, error) {
 		rateLimitAuth(d.Logger, d.AuthLimiter, d.TrustedProxies),
 		identify(d.Tokens),
 		middleware(validator),
-	), nil
+	)
+
+	mux := http.NewServeMux()
+	mux.Handle("/", apiHandler)
+	if d.WebSocket != nil {
+		// O CORS vale aqui: é ele que recusa (403) origens de navegador fora da lista, antes do upgrade.
+		mux.Handle("/ws", chain(d.WebSocket,
+			recoverer(d.Logger),
+			accessLog(d.Logger, d.TrustedProxies),
+			cors(d.Logger, d.CORSOrigins),
+		))
+	}
+	if d.Webhook != nil {
+		// Chamado pelo LiveKit (servidor a servidor): sem CORS e sem rate limit por IP, a assinatura é a defesa.
+		mux.Handle("/webhooks/livekit", chain(d.Webhook,
+			recoverer(d.Logger),
+			accessLog(d.Logger, d.TrustedProxies),
+		))
+	}
+	return mux, nil
 }
 
 // requireIdentity é chamada pelo validador para as operações que declaram `security: bearerAuth` no contrato.

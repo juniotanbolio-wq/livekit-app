@@ -100,6 +100,10 @@ func TestLoadInvalid(t *testing.T) {
 		"corpo":          {"MAX_BODY_BYTES": "-1"},
 		"convite":        {"INVITE_TTL_HOURS": "abc"},
 		"proxy":          {"TRUSTED_PROXIES": "não-é-ip"},
+		"lk url interna": {"LIVEKIT_URL": "ws://livekit:7880"},
+		"reconciliação":  {"RECONCILE_INTERVAL": "0s"},
+		"ws por usuário": {"WS_MAX_CONNS_PER_USER": "0"},
+		"menção":         {"MENTION_SENDER_LIMIT": "-3"},
 	}
 	for name, overrides := range cases {
 		if _, err := Load(validEnv(overrides)); err == nil {
@@ -117,5 +121,42 @@ func TestLoadReportsAllErrorsAtOnce(t *testing.T) {
 		if !strings.Contains(err.Error(), key) {
 			t.Errorf("erro deveria mencionar %s: %v", key, err)
 		}
+	}
+}
+
+func TestLoadRealtimeDefaults(t *testing.T) {
+	cfg, err := Load(validEnv(nil))
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if cfg.LiveKitURL != "http://localhost:7880" {
+		t.Fatalf("LIVEKIT_URL deveria derivar da pública: %q", cfg.LiveKitURL)
+	}
+	if cfg.ReconcileInterval != time.Minute || cfg.WSAuthTimeout != 5*time.Second || cfg.WSPingInterval != 20*time.Second {
+		t.Fatalf("durações de tempo real incorretas: %+v", cfg)
+	}
+	if cfg.WSMaxConnsPerUser != 3 || cfg.WSMaxConns != 200 {
+		t.Fatalf("limites de conexão incorretos: %+v", cfg)
+	}
+	if cfg.MentionSenderLimit != 5 || cfg.MentionRecipientLimit != 5 || cfg.MentionWindow != 30*time.Second {
+		t.Fatalf("limites de menção incorretos: %+v", cfg)
+	}
+}
+
+func TestLoadLiveKitURLDerivation(t *testing.T) {
+	cfg, err := Load(validEnv(map[string]string{"LIVEKIT_PUBLIC_URL": "wss://live.exemplo.com"}))
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if cfg.LiveKitURL != "https://live.exemplo.com" {
+		t.Fatalf("wss deveria virar https: %q", cfg.LiveKitURL)
+	}
+
+	cfg, err = Load(validEnv(map[string]string{"LIVEKIT_URL": "http://livekit:7880"}))
+	if err != nil {
+		t.Fatalf("erro inesperado: %v", err)
+	}
+	if cfg.LiveKitURL != "http://livekit:7880" {
+		t.Fatalf("LIVEKIT_URL explícita deveria prevalecer: %q", cfg.LiveKitURL)
 	}
 }

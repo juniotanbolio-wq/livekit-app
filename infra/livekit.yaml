@@ -12,3 +12,11 @@ room:
 logging:
   level: info
   json: false
+# O LiveKit avisa o backend (presença e quem está transmitindo) por webhooks assinados com esta chave de API.
+# `api_key` precisa ser o NOME de uma das chaves em LIVEKIT_KEYS; o segredo é o mesmo par. No desenvolvimento
+# o docker-compose.yml fixa a chave como `devkey`; o e2e.ps1 troca estes dois valores por cópia temporária.
+# `backend` é o nome do serviço no docker-compose.yml (rede interna do Compose).
+webhook:
+  api_key: devkey
+  urls:
+    - http://backend:8080/webhooks/livekit

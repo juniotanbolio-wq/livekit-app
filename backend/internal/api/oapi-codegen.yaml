@@ -6,3 +6,7 @@ generate:
   strict-server: true
   # Spec embutida: o middleware de validação lê o contrato do próprio binário, sem arquivo em disco.
   embedded-spec: true
+output-options:
+  # As mensagens do WebSocket (WsSnapshot, WsMention...) ficam em components/schemas sem nenhuma rota que as
+  # referencie; sem isto o gerador as descartaria como "não usadas".
+  skip-prune: true

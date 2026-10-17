@@ -34,6 +34,21 @@ type Config struct {
 	// LiveKitPublicURL é o endereço WebSocket que o cliente usa para falar com o LiveKit.
 	LiveKitPublicURL string
 	LiveKitTokenTTL  time.Duration
+	// LiveKitURL é o endereço HTTP(S) que o BACKEND usa para falar com o LiveKit (RoomService). Pode diferir
+	// do público: dentro do Docker é algo como http://livekit:7880, enquanto o cliente usa ws://localhost:7880.
+	LiveKitURL string
+
+	// Tempo real (presença e menções).
+	ReconcileInterval time.Duration // de quanto em quanto tempo o estado em memória é conferido com o LiveKit
+	WSAuthTimeout     time.Duration // prazo para o cliente enviar a mensagem de autenticação
+	WSPingInterval    time.Duration // intervalo entre pings do servidor (o timeout do pong é derivado dele)
+	WSMaxConnsPerUser int           // conexões simultâneas por usuário; ao exceder, a mais antiga é encerrada
+	WSMaxConns        int           // teto global de conexões WebSocket (proteção contra esgotamento)
+
+	// Limites de menção numa mesma janela: por remetente e por destinatário.
+	MentionSenderLimit    int
+	MentionRecipientLimit int
+	MentionWindow         time.Duration
 
 	InviteTTL time.Duration
 
@@ -71,7 +86,18 @@ func Load(getenv func(string) string) (Config, error) {
 		MaxBodyBytes:      int64(l.positiveInt("MAX_BODY_BYTES", 32*1024)),
 		SeedAdminUsername: strings.TrimSpace(getenv("SEED_ADMIN_USERNAME")),
 		SeedAdminPassword: getenv("SEED_ADMIN_PASSWORD"),
+
+		ReconcileInterval:     l.duration("RECONCILE_INTERVAL", time.Minute),
+		WSAuthTimeout:         l.duration("WS_AUTH_TIMEOUT", 5*time.Second),
+		WSPingInterval:        l.duration("WS_PING_INTERVAL", 20*time.Second),
+		WSMaxConnsPerUser:     l.positiveInt("WS_MAX_CONNS_PER_USER", 3),
+		WSMaxConns:            l.positiveInt("WS_MAX_CONNS", 200),
+		MentionSenderLimit:    l.positiveInt("MENTION_SENDER_LIMIT", 5),
+		MentionRecipientLimit: l.positiveInt("MENTION_RECIPIENT_LIMIT", 5),
+		MentionWindow:         l.duration("MENTION_WINDOW", 30*time.Second),
 	}
+	// Sem LIVEKIT_URL, usa o endereço público trocando ws/wss por http/https (caso do desenvolvimento local).
+	cfg.LiveKitURL = l.httpURL("LIVEKIT_URL", httpFromWS(cfg.LiveKitPublicURL))
 
 	level, err := parseLevel(l.str("LOG_LEVEL", "info"))
 	if err != nil {
@@ -163,6 +189,27 @@ func (l *loader) wsURL(key, fallback string) string {
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "ws" && u.Scheme != "wss") || u.Host == "" {
 		l.errs = append(l.errs, fmt.Errorf("%s inválida %q: use ws://host:porta ou wss://host", key, raw))
+	}
+	return raw
+}
+
+func (l *loader) httpURL(key, fallback string) string {
+	raw := l.str(key, fallback)
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		l.errs = append(l.errs, fmt.Errorf("%s inválida %q: use http://host:porta ou https://host", key, raw))
+	}
+	return raw
+}
+
+// httpFromWS converte ws:// em http:// e wss:// em https://; qualquer outra coisa passa sem mudança
+// (a validação de esquema já reclama de valores inválidos).
+func httpFromWS(raw string) string {
+	if rest, ok := strings.CutPrefix(raw, "wss://"); ok {
+		return "https://" + rest
+	}
+	if rest, ok := strings.CutPrefix(raw, "ws://"); ok {
+		return "http://" + rest
 	}
 	return raw
 }

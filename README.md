@@ -39,4 +39,4 @@ Detalhes de cada parte estão no README da respectiva pasta.
 
 ## Estado
 
-Fases R0 (reestruturação) e R1a (backend Go: identidade, canais e tokens LiveKit) concluídas. O app segue sem backend conectado até a fase R2; a presença em tempo real e as menções chegam na R1b.
+Fases R0 (reestruturação), R1a (backend Go: identidade, canais e tokens LiveKit) e R1b (tempo real: webhooks do LiveKit, presença, WebSocket e menções) concluídas. O app segue sem backend conectado até a fase R2, que troca o polling de presença pelo WebSocket ([protocolo](docs/protocolo-tempo-real.md)).

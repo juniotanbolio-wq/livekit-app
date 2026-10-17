@@ -16,15 +16,20 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
+
+	lksdk "github.com/livekit/server-sdk-go/v2"
 
 	"livekit-app/backend/internal/auth"
 	"livekit-app/backend/internal/config"
 	"livekit-app/backend/internal/db"
 	"livekit-app/backend/internal/httpapi"
 	"livekit-app/backend/internal/livekit"
+	"livekit-app/backend/internal/presence"
 	"livekit-app/backend/internal/ratelimit"
+	"livekit-app/backend/internal/realtime"
 	"livekit-app/backend/internal/service"
 )
 
@@ -82,15 +87,37 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 	defer func() { err = errors.Join(err, closeDB()) }()
 
 	limiter := ratelimit.New(cfg.AuthRateLimit, cfg.AuthRateWindow, time.Now)
+	tokens := auth.NewTokens(cfg.JWTSecret, cfg.JWTTTL, time.Now)
+
+	// Tempo real: os webhooks do LiveKit alimentam o Tracker (presença em memória), o hub entrega ao
+	// WebSocket e o reconciliador corrige o que os webhooks deixarem escapar.
+	tracker := presence.New(time.Now)
+	hub := realtime.NewHub(realtime.Config{
+		AuthTimeout:           cfg.WSAuthTimeout,
+		PingInterval:          cfg.WSPingInterval,
+		MaxConnsPerUser:       cfg.WSMaxConnsPerUser,
+		MaxConns:              cfg.WSMaxConns,
+		AllowedOrigins:        cfg.CORSOrigins,
+		MentionSenderLimit:    cfg.MentionSenderLimit,
+		MentionRecipientLimit: cfg.MentionRecipientLimit,
+		MentionWindow:         cfg.MentionWindow,
+	}, realtime.Deps{Logger: logger, Tracker: tracker, Directory: svc, Tokens: tokens, Now: time.Now})
+	// Fecha as conexões WebSocket ANTES de o banco fechar (defer roda em ordem inversa): os handlers ainda consultam o serviço.
+	defer hub.Close()
+	reconciler := livekit.NewReconciler(
+		lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret), tracker, logger, time.Now)
+
 	handler, err := httpapi.NewHandler(httpapi.Deps{
 		Logger:         logger,
 		Service:        svc,
-		Tokens:         auth.NewTokens(cfg.JWTSecret, cfg.JWTTTL, time.Now),
+		Tokens:         tokens,
 		LiveKit:        livekit.NewIssuer(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitPublicURL, cfg.LiveKitTokenTTL),
 		AuthLimiter:    limiter,
 		CORSOrigins:    cfg.CORSOrigins,
 		TrustedProxies: cfg.TrustedProxies,
 		MaxBodyBytes:   cfg.MaxBodyBytes,
+		WebSocket:      hub,
+		Webhook:        livekit.NewWebhookReceiver(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, tracker, logger),
 	})
 	if err != nil {
 		return fmt.Errorf("montar roteador: %w", err)
@@ -107,16 +134,16 @@ func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err err
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	// A limpeza do rate limit para junto com o servidor; limiterDone garante que a goroutine terminou.
-	limiterCtx, cancelLimiter := context.WithCancel(ctx)
-	limiterDone := make(chan struct{})
-	go func() {
-		defer close(limiterDone)
-		limiter.Run(limiterCtx, time.Minute)
-	}()
+	// As rotinas de fundo (limpeza dos limitadores e reconciliação com o LiveKit) param junto com o servidor;
+	// o wg garante que todas terminaram antes de a função retornar (nenhuma goroutine vazada).
+	bgCtx, cancelBackground := context.WithCancel(ctx)
+	var background sync.WaitGroup
+	background.Go(func() { limiter.Run(bgCtx, time.Minute) })
+	background.Go(func() { hub.Run(bgCtx) })
+	background.Go(func() { reconciler.Run(bgCtx, cfg.ReconcileInterval) })
 	defer func() {
-		cancelLimiter()
-		<-limiterDone
+		cancelBackground()
+		background.Wait()
 	}()
 
 	// Canal com buffer 1: a goroutine de ListenAndServe nunca fica bloqueada ao devolver o erro.

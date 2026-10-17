@@ -54,6 +54,189 @@ func (e LiveKitRole) Valid() bool {
 	}
 }
 
+// Defines values for WsClientAuthType.
+const (
+	Auth WsClientAuthType = "auth"
+)
+
+// Valid indicates whether the value is a known member of the WsClientAuthType enum.
+func (e WsClientAuthType) Valid() bool {
+	switch e {
+	case Auth:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsClientMentionType.
+const (
+	WsClientMentionTypeMention WsClientMentionType = "mention"
+)
+
+// Valid indicates whether the value is a known member of the WsClientMentionType enum.
+func (e WsClientMentionType) Valid() bool {
+	switch e {
+	case WsClientMentionTypeMention:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsErrorType.
+const (
+	Error WsErrorType = "error"
+)
+
+// Valid indicates whether the value is a known member of the WsErrorType enum.
+func (e WsErrorType) Valid() bool {
+	switch e {
+	case Error:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsErrorCode.
+const (
+	WsErrorCodeBadMessage           WsErrorCode = "bad_message"
+	WsErrorCodeRateLimitedRecipient WsErrorCode = "rate_limited_recipient"
+	WsErrorCodeRateLimitedSender    WsErrorCode = "rate_limited_sender"
+	WsErrorCodeRecipientOffline     WsErrorCode = "recipient_offline"
+	WsErrorCodeSelfMention          WsErrorCode = "self_mention"
+	WsErrorCodeUnauthorized         WsErrorCode = "unauthorized"
+	WsErrorCodeUnknownUser          WsErrorCode = "unknown_user"
+)
+
+// Valid indicates whether the value is a known member of the WsErrorCode enum.
+func (e WsErrorCode) Valid() bool {
+	switch e {
+	case WsErrorCodeBadMessage:
+		return true
+	case WsErrorCodeRateLimitedRecipient:
+		return true
+	case WsErrorCodeRateLimitedSender:
+		return true
+	case WsErrorCodeRecipientOffline:
+		return true
+	case WsErrorCodeSelfMention:
+		return true
+	case WsErrorCodeUnauthorized:
+		return true
+	case WsErrorCodeUnknownUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsMentionType.
+const (
+	WsMentionTypeMention WsMentionType = "mention"
+)
+
+// Valid indicates whether the value is a known member of the WsMentionType enum.
+func (e WsMentionType) Valid() bool {
+	switch e {
+	case WsMentionTypeMention:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsMentionSentType.
+const (
+	MentionSent WsMentionSentType = "mention_sent"
+)
+
+// Valid indicates whether the value is a known member of the WsMentionSentType enum.
+func (e WsMentionSentType) Valid() bool {
+	switch e {
+	case MentionSent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsParticipantJoinedType.
+const (
+	ParticipantJoined WsParticipantJoinedType = "participant_joined"
+)
+
+// Valid indicates whether the value is a known member of the WsParticipantJoinedType enum.
+func (e WsParticipantJoinedType) Valid() bool {
+	switch e {
+	case ParticipantJoined:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsParticipantLeftType.
+const (
+	ParticipantLeft WsParticipantLeftType = "participant_left"
+)
+
+// Valid indicates whether the value is a known member of the WsParticipantLeftType enum.
+func (e WsParticipantLeftType) Valid() bool {
+	switch e {
+	case ParticipantLeft:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsSnapshotType.
+const (
+	Snapshot WsSnapshotType = "snapshot"
+)
+
+// Valid indicates whether the value is a known member of the WsSnapshotType enum.
+func (e WsSnapshotType) Valid() bool {
+	switch e {
+	case Snapshot:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsStreamStartedType.
+const (
+	StreamStarted WsStreamStartedType = "stream_started"
+)
+
+// Valid indicates whether the value is a known member of the WsStreamStartedType enum.
+func (e WsStreamStartedType) Valid() bool {
+	switch e {
+	case StreamStarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for WsStreamStoppedType.
+const (
+	StreamStopped WsStreamStoppedType = "stream_stopped"
+)
+
+// Valid indicates whether the value is a known member of the WsStreamStoppedType enum.
+func (e WsStreamStoppedType) Valid() bool {
+	switch e {
+	case StreamStopped:
+		return true
+	default:
+		return false
+	}
+}
+
 // AuthResponse defines model for AuthResponse.
 type AuthResponse struct {
 	Token string `json:"token"`
@@ -70,6 +253,12 @@ type Channel struct {
 // ChannelListResponse defines model for ChannelListResponse.
 type ChannelListResponse struct {
 	Channels []Channel `json:"channels"`
+}
+
+// ChannelPresence defines model for ChannelPresence.
+type ChannelPresence struct {
+	ChannelId    string                `json:"channelId"`
+	Participants []PresenceParticipant `json:"participants"`
 }
 
 // ErrorResponse defines model for ErrorResponse.
@@ -111,6 +300,19 @@ type LoginRequest struct {
 	Username Username `json:"username"`
 }
 
+// PresenceParticipant defines model for PresenceParticipant.
+type PresenceParticipant struct {
+	IsScreenSharing bool   `json:"isScreenSharing"`
+	UserId          string `json:"userId"`
+	Username        string `json:"username"`
+}
+
+// PublicUser defines model for PublicUser.
+type PublicUser struct {
+	Id       string   `json:"id"`
+	Username Username `json:"username"`
+}
+
 // RegisterRequest defines model for RegisterRequest.
 type RegisterRequest struct {
 	InviteCode string   `json:"inviteCode"`
@@ -128,6 +330,116 @@ type User struct {
 
 // Username defines model for Username.
 type Username = string
+
+// WsClientAuth Primeira mensagem obrigatória do cliente. O token de sessão NÃO vai na URL (URLs vazam em logs).
+type WsClientAuth struct {
+	Token string           `json:"token"`
+	Type  WsClientAuthType `json:"type"`
+}
+
+// WsClientAuthType defines model for WsClientAuth.Type.
+type WsClientAuthType string
+
+// WsClientMention Chama a atenção de um usuário conectado.
+type WsClientMention struct {
+	Message *string `json:"message,omitempty"`
+
+	// Ref Identificador escolhido pelo cliente, devolvido na confirmação ou no erro
+	Ref          *string             `json:"ref,omitempty"`
+	TargetUserId string              `json:"targetUserId"`
+	Type         WsClientMentionType `json:"type"`
+}
+
+// WsClientMentionType defines model for WsClientMention.Type.
+type WsClientMentionType string
+
+// WsError defines model for WsError.
+type WsError struct {
+	Code    WsErrorCode `json:"code"`
+	Message string      `json:"message"`
+	Ref     *string     `json:"ref,omitempty"`
+	Type    WsErrorType `json:"type"`
+}
+
+// WsErrorType defines model for WsError.Type.
+type WsErrorType string
+
+// WsErrorCode defines model for WsErrorCode.
+type WsErrorCode string
+
+// WsMention Entregue ao destinatário. Não tem seq (é por usuário, não estado compartilhado) e não é persistida.
+type WsMention struct {
+	From    PublicUser    `json:"from"`
+	Message *string       `json:"message,omitempty"`
+	SentAt  time.Time     `json:"sentAt"`
+	Type    WsMentionType `json:"type"`
+}
+
+// WsMentionType defines model for WsMention.Type.
+type WsMentionType string
+
+// WsMentionSent Confirma ao remetente que a menção foi entregue a pelo menos uma conexão do destinatário.
+type WsMentionSent struct {
+	Ref  *string           `json:"ref,omitempty"`
+	Type WsMentionSentType `json:"type"`
+}
+
+// WsMentionSentType defines model for WsMentionSent.Type.
+type WsMentionSentType string
+
+// WsParticipantJoined defines model for WsParticipantJoined.
+type WsParticipantJoined struct {
+	ChannelId   string                  `json:"channelId"`
+	Participant PresenceParticipant     `json:"participant"`
+	Seq         int64                   `json:"seq"`
+	Type        WsParticipantJoinedType `json:"type"`
+}
+
+// WsParticipantJoinedType defines model for WsParticipantJoined.Type.
+type WsParticipantJoinedType string
+
+// WsParticipantLeft O usuário saiu do canal (isso também encerra qualquer transmissão dele).
+type WsParticipantLeft struct {
+	ChannelId string                `json:"channelId"`
+	Seq       int64                 `json:"seq"`
+	Type      WsParticipantLeftType `json:"type"`
+	UserId    string                `json:"userId"`
+}
+
+// WsParticipantLeftType defines model for WsParticipantLeft.Type.
+type WsParticipantLeftType string
+
+// WsSnapshot Estado completo da presença, enviado logo após a autenticação. As mudanças seguintes têm seq maior.
+type WsSnapshot struct {
+	Channels []ChannelPresence `json:"channels"`
+	Seq      int64             `json:"seq"`
+	Type     WsSnapshotType    `json:"type"`
+}
+
+// WsSnapshotType defines model for WsSnapshot.Type.
+type WsSnapshotType string
+
+// WsStreamStarted defines model for WsStreamStarted.
+type WsStreamStarted struct {
+	ChannelId string              `json:"channelId"`
+	Seq       int64               `json:"seq"`
+	Type      WsStreamStartedType `json:"type"`
+	UserId    string              `json:"userId"`
+}
+
+// WsStreamStartedType defines model for WsStreamStarted.Type.
+type WsStreamStartedType string
+
+// WsStreamStopped defines model for WsStreamStopped.
+type WsStreamStopped struct {
+	ChannelId string              `json:"channelId"`
+	Seq       int64               `json:"seq"`
+	Type      WsStreamStoppedType `json:"type"`
+	UserId    string              `json:"userId"`
+}
+
+// WsStreamStoppedType defines model for WsStreamStopped.Type.
+type WsStreamStoppedType string
 
 // BadRequest defines model for BadRequest.
 type BadRequest = ErrorResponse
@@ -963,33 +1275,46 @@ func (sh *strictHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 // const string: with thousands of chunks the chained `+` fold is several
 // times slower for the Go compiler than parsing a slice literal.
 var swaggerSpec = []string{
-	"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",
-	"vzPUKtTqS9AxC11UjNIh617b4JcBAA==",
+	"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",
+	"JARbpvyfk0lCrL5AEzOYMmJUCtkWaqP/DQA=",
 }
 
 // decodeSpec returns the embedded OpenAPI spec as raw JSON bytes,

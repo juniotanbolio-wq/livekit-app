@@ -1,12 +1,20 @@
 name: livekit-app
 
+# Ambiente de desenvolvimento (Docker Desktop): LiveKit + backend. O Compose de produção (Caddy, TURN) é da R3.
+#
+#   cd infra
+#   Copy-Item .env.example .env        # preencha LIVEKIT_API_SECRET e JWT_SECRET (32+ caracteres)
+#   docker compose up -d --build
+#   docker compose exec backend /server seed
+#   docker compose exec backend /server invite create
 services:
   livekit:
     image: livekit/livekit-server:v1.13.10
     restart: unless-stopped
     command: --config /etc/livekit.yaml
     environment:
-      LIVEKIT_KEYS: '${LIVEKIT_API_KEY:?defina LIVEKIT_API_KEY em infra/.env}: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET em infra/.env}'
+      # A chave é fixa (devkey) porque o livekit.yaml precisa citar o nome dela na seção `webhook`.
+      LIVEKIT_KEYS: 'devkey: ${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET em infra/.env}'
       NODE_IP: '${LIVEKIT_NODE_IP:-127.0.0.1}'
     ports:
       - '7880:7880'
@@ -14,3 +22,27 @@ services:
       - '7882:7882/udp'
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+
+  backend:
+    build:
+      context: ../backend
+    restart: unless-stopped
+    depends_on:
+      - livekit
+    environment:
+      JWT_SECRET: '${JWT_SECRET:?defina JWT_SECRET em infra/.env}'
+      LIVEKIT_API_KEY: devkey
+      LIVEKIT_API_SECRET: '${LIVEKIT_API_SECRET:?defina LIVEKIT_API_SECRET em infra/.env}'
+      # O backend fala com o LiveKit pela rede interna; o cliente (fora do Docker) usa o endereço público.
+      LIVEKIT_URL: http://livekit:7880
+      LIVEKIT_PUBLIC_URL: '${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}'
+      SEED_ADMIN_USERNAME: '${SEED_ADMIN_USERNAME:-admin}'
+      SEED_ADMIN_PASSWORD: '${SEED_ADMIN_PASSWORD:-}'
+    ports:
+      # Só na máquina local. Na R3 quem expõe o backend é o Caddy, com TLS.
+      - '127.0.0.1:8080:8080'
+    volumes:
+      - backend-data:/data
+
+volumes:
+  backend-data:

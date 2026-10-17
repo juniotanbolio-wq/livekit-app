@@ -267,6 +267,195 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Channel'
+    PublicUser:
+      type: object
+      required: [id, username]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        username:
+          $ref: '#/components/schemas/Username'
+    PresenceParticipant:
+      type: object
+      required: [userId, username, isScreenSharing]
+      properties:
+        userId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        username:
+          type: string
+        isScreenSharing:
+          type: boolean
+    ChannelPresence:
+      type: object
+      required: [channelId, participants]
+      properties:
+        channelId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        participants:
+          type: array
+          items:
+            $ref: '#/components/schemas/PresenceParticipant'
+    # ---- Mensagens do WebSocket (GET /ws) ----
+    # O WebSocket não é descrito em `paths` (o oapi-codegen não gera servidor para ele), mas as mensagens
+    # ficam aqui para os tipos do cliente TypeScript e do servidor Go saírem do mesmo lugar.
+    # Protocolo completo (autenticação, sequência, limites): docs/protocolo-tempo-real.md.
+    WsClientAuth:
+      type: object
+      description: Primeira mensagem obrigatória do cliente. O token de sessão NÃO vai na URL (URLs vazam em logs).
+      required: [type, token]
+      properties:
+        type:
+          type: string
+          enum: [auth]
+        token:
+          type: string
+          minLength: 1
+    WsClientMention:
+      type: object
+      description: Chama a atenção de um usuário conectado.
+      required: [type, targetUserId]
+      properties:
+        type:
+          type: string
+          enum: [mention]
+        targetUserId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        message:
+          type: string
+          maxLength: 140
+        ref:
+          type: string
+          maxLength: 64
+          description: Identificador escolhido pelo cliente, devolvido na confirmação ou no erro
+    WsSnapshot:
+      type: object
+      description: Estado completo da presença, enviado logo após a autenticação. As mudanças seguintes têm seq maior.
+      required: [type, seq, channels]
+      properties:
+        type:
+          type: string
+          enum: [snapshot]
+        seq:
+          type: integer
+          format: int64
+          minimum: 0
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/ChannelPresence'
+    WsParticipantJoined:
+      type: object
+      required: [type, seq, channelId, participant]
+      properties:
+        type:
+          type: string
+          enum: [participant_joined]
+        seq:
+          type: integer
+          format: int64
+        channelId:
+          type: string
+        participant:
+          $ref: '#/components/schemas/PresenceParticipant'
+    WsParticipantLeft:
+      type: object
+      description: O usuário saiu do canal (isso também encerra qualquer transmissão dele).
+      required: [type, seq, channelId, userId]
+      properties:
+        type:
+          type: string
+          enum: [participant_left]
+        seq:
+          type: integer
+          format: int64
+        channelId:
+          type: string
+        userId:
+          type: string
+    WsStreamStarted:
+      type: object
+      required: [type, seq, channelId, userId]
+      properties:
+        type:
+          type: string
+          enum: [stream_started]
+        seq:
+          type: integer
+          format: int64
+        channelId:
+          type: string
+        userId:
+          type: string
+    WsStreamStopped:
+      type: object
+      required: [type, seq, channelId, userId]
+      properties:
+        type:
+          type: string
+          enum: [stream_stopped]
+        seq:
+          type: integer
+          format: int64
+        channelId:
+          type: string
+        userId:
+          type: string
+    WsMention:
+      type: object
+      description: Entregue ao destinatário. Não tem seq (é por usuário, não estado compartilhado) e não é persistida.
+      required: [type, from, sentAt]
+      properties:
+        type:
+          type: string
+          enum: [mention]
+        from:
+          $ref: '#/components/schemas/PublicUser'
+        message:
+          type: string
+        sentAt:
+          type: string
+          format: date-time
+    WsMentionSent:
+      type: object
+      description: Confirma ao remetente que a menção foi entregue a pelo menos uma conexão do destinatário.
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [mention_sent]
+        ref:
+          type: string
+    WsErrorCode:
+      type: string
+      enum:
+        - unauthorized
+        - bad_message
+        - rate_limited_sender
+        - rate_limited_recipient
+        - recipient_offline
+        - unknown_user
+        - self_mention
+    WsError:
+      type: object
+      required: [type, code, message]
+      properties:
+        type:
+          type: string
+          enum: [error]
+        code:
+          $ref: '#/components/schemas/WsErrorCode'
+        message:
+          type: string
+        ref:
+          type: string
     LiveKitRole:
       type: string
       enum: [voice, spectator]
