@@ -5,3 +5,26 @@ body,
 #root {
   height: 100%;
 }
+
+body {
+  overflow: hidden;
+  user-select: none;
+}
+
+input,
+textarea,
+p,
+time {
+  user-select: text;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgb(24 24 27);
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}

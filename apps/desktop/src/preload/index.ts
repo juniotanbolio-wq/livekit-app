@@ -1,8 +1,12 @@
-import { contextBridge } from 'electron';
-import type { DesktopApi } from './api';
+import { contextBridge, ipcRenderer } from 'electron';
+import { IpcChannel, type DesktopApi, type DesktopConfig } from '../shared/desktop-api';
 
 const api: DesktopApi = {
   platform: process.platform,
+  getConfig: () => ipcRenderer.invoke(IpcChannel.configGet) as Promise<DesktopConfig>,
+  getSession: () => ipcRenderer.invoke(IpcChannel.sessionGet) as Promise<string | null>,
+  setSession: (value) => ipcRenderer.invoke(IpcChannel.sessionSet, value) as Promise<void>,
+  clearSession: () => ipcRenderer.invoke(IpcChannel.sessionClear) as Promise<void>,
 };
 
 contextBridge.exposeInMainWorld('desktop', api);

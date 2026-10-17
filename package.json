@@ -22,7 +22,8 @@
     "db:migrate": "npm run db:migrate -w @livekit-app/server",
     "db:seed": "npm run db:seed -w @livekit-app/server",
     "invite:create": "npm run invite:create -w @livekit-app/server --",
-    "postinstall": "npm run build -w @livekit-app/shared"
+    "postinstall": "npm run build -w @livekit-app/shared",
+    "dev:second": "npm run dev:second -w @livekit-app/desktop"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

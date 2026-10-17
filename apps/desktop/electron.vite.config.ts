@@ -6,6 +6,11 @@ export default defineConfig({
   main: {},
   preload: {},
   renderer: {
+    server: {
+      host: 'localhost',
+      port: 5173,
+      strictPort: true,
+    },
     plugins: [react(), tailwindcss()],
   },
 });

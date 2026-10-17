@@ -6,6 +6,7 @@ import { errorHandler, notFoundHandler } from './http/errors.js';
 import { authRouter } from './routes/auth.js';
 import { channelsRouter } from './routes/channels.js';
 import { liveKitRouter } from './routes/livekit.js';
+import { presenceRouter } from './routes/presence.js';
 
 export function createApp(): express.Express {
   const app = express();
@@ -22,6 +23,7 @@ export function createApp(): express.Express {
   app.use('/api/auth', authRouter);
   app.use('/api/channels', channelsRouter);
   app.use('/api/livekit', liveKitRouter);
+  app.use('/api/presence', presenceRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

@@ -1,7 +1,19 @@
 import { join } from 'node:path';
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
+import { loadMainConfig, type MainConfig } from './config';
+import { registerIpcHandlers } from './ipc';
+import {
+  APP_ORIGIN,
+  applySessionSecurity,
+  buildCsp,
+  enforceGlobalHardening,
+  registerAppProtocol,
+  registerAppScheme,
+} from './security';
 
-function createWindow(): void {
+let mainWindow: BrowserWindow | null = null;
+
+function createWindow(config: MainConfig): BrowserWindow {
   const window = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -10,42 +22,80 @@ function createWindow(): void {
     show: false,
     autoHideMenuBar: true,
     backgroundColor: '#1e1f22',
+    title: 'LiveKit App',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      webSecurity: true,
+      webviewTag: false,
+      spellcheck: false,
     },
   });
 
   window.once('ready-to-show', () => window.show());
-
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith('https://')) {
-      void shell.openExternal(url);
+  window.on('closed', () => {
+    if (mainWindow === window) {
+      mainWindow = null;
     }
-    return { action: 'deny' };
   });
 
-  const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
-  if (!app.isPackaged && rendererUrl) {
-    void window.loadURL(rendererUrl);
-  } else {
-    void window.loadFile(join(__dirname, '../renderer/index.html'));
-  }
+  void window.loadURL(config.rendererDevUrl ?? `${APP_ORIGIN}/index.html`);
+  return window;
 }
 
-void app.whenReady().then(() => {
-  createWindow();
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+function focusMainWindow(): void {
+  if (!mainWindow) {
+    return;
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+  mainWindow.focus();
+}
+
+function start(): void {
+  const config = loadMainConfig();
+  if (config.userDataDir) {
+    app.setPath('userData', config.userDataDir);
+  }
+
+  if (!config.multiInstance && !app.requestSingleInstanceLock()) {
+    app.quit();
+    return;
+  }
+  app.on('second-instance', focusMainWindow);
+
+  registerAppScheme();
+  enforceGlobalHardening(config);
+
+  void app.whenReady().then(() => {
+    const csp = buildCsp(config);
+    registerAppProtocol(join(__dirname, '../renderer'), csp);
+    applySessionSecurity(config, csp);
+    registerIpcHandlers(config);
+    mainWindow = createWindow(config);
+
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        mainWindow = createWindow(config);
+      }
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
     }
   });
-});
+}
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+try {
+  start();
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  console.error(message);
+  dialog.showErrorBox('Falha ao iniciar', message);
+  app.exit(1);
+}

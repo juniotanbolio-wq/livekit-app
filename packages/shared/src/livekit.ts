@@ -1,6 +1,8 @@
 import { z } from 'zod';
 import { idSchema } from './common.js';
 
+export const SPECTATOR_IDENTITY_SUFFIX = '#spectator';
+
 export const liveKitRoleSchema = z.enum(['voice', 'spectator']);
 
 export type LiveKitRole = z.infer<typeof liveKitRoleSchema>;

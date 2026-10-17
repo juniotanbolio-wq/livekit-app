@@ -12,14 +12,16 @@ const envSchema = z.object({
   JWT_EXPIRES_IN: durationSchema.default('7d'),
   CORS_ORIGINS: z
     .string()
-    .default('http://localhost:5173')
+    .default('http://localhost:5173,http://127.0.0.1:5173,app://desktop')
     .transform((value) =>
       value
         .split(',')
         .map((origin) => origin.trim())
         .filter((origin) => origin.length > 0),
     ),
-  LIVEKIT_URL: z.url(),
+  LIVEKIT_URL: z.url().default('http://localhost:7880'),
+  LIVEKIT_PUBLIC_URL: z.url().default('ws://localhost:7880'),
+  PRESENCE_CACHE_MS: z.coerce.number().int().min(0).max(60000).default(2000),
   LIVEKIT_API_KEY: z.string().min(1),
   LIVEKIT_API_SECRET: z.string().min(32),
   LIVEKIT_TOKEN_TTL: durationSchema.default('6h'),

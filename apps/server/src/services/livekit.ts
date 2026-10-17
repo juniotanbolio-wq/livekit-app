@@ -1,5 +1,9 @@
 import { AccessToken, type VideoGrant } from 'livekit-server-sdk';
-import type { LiveKitRole, LiveKitTokenResponse } from '@livekit-app/shared';
+import {
+  SPECTATOR_IDENTITY_SUFFIX,
+  type LiveKitRole,
+  type LiveKitTokenResponse,
+} from '@livekit-app/shared';
 import { loadConfig } from '../config.js';
 
 export function roomNameForChannel(channelId: string): string {
@@ -34,11 +38,11 @@ export async function createLiveKitToken(
   const config = loadConfig();
   const roomName = roomNameForChannel(channelId);
   const accessToken = new AccessToken(config.LIVEKIT_API_KEY, config.LIVEKIT_API_SECRET, {
-    identity: role === 'spectator' ? `${user.id}#spectator` : user.id,
+    identity: role === 'spectator' ? `${user.id}${SPECTATOR_IDENTITY_SUFFIX}` : user.id,
     name: user.username,
     ttl: config.LIVEKIT_TOKEN_TTL,
     metadata: JSON.stringify({ userId: user.id, role }),
   });
   accessToken.addGrant(grantFor(role, roomName));
-  return { token: await accessToken.toJwt(), url: config.LIVEKIT_URL, roomName };
+  return { token: await accessToken.toJwt(), url: config.LIVEKIT_PUBLIC_URL, roomName };
 }

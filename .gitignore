@@ -10,3 +10,4 @@ out/
 .DS_Store
 Thumbs.db
 apps/server/src/generated/
+.electron-second/
