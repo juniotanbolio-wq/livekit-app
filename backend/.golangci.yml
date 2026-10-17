@@ -6,3 +6,10 @@ linters:
     - bodyclose
     - noctx
     - gosec
+  exclusions:
+    rules:
+      # Senhas e segredos de teste são falsos e ficam de propósito no código dos testes.
+      - path: _test\.go
+        linters:
+          - gosec
+        text: "G101"

@@ -1,0 +1,10 @@
+version: "2"
+sql:
+  - engine: sqlite
+    # O sqlc lê só a parte "Up" das migrações do goose.
+    schema: internal/db/migrations
+    queries: internal/db/queries
+    gen:
+      go:
+        package: store
+        out: internal/store

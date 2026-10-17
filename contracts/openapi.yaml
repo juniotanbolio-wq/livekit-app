@@ -1,6 +1,295 @@
-openapi: 3.1.0
+openapi: 3.0.3
 info:
   title: LiveKit App API
-  version: 0.0.0
-  description: Marcador da fase R0. As rotas reais entram na fase R1a.
-paths: {}
+  version: 0.1.0
+  description: |
+    Contrato único entre frontend e backend. O servidor Go (backend/internal/api) e, a partir da R2,
+    os tipos TypeScript são gerados a partir deste arquivo.
+
+    Versão 3.0.x de propósito: é a que o oapi-codegen suporta de forma estável.
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Verificação de saúde (não depende de banco nem de LiveKit)
+      responses:
+        '200':
+          description: Servidor vivo
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+  /api/auth/register:
+    post:
+      operationId: register
+      summary: Cadastro com convite de uso único
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Usuário criado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/auth/login:
+    post:
+      operationId: login
+      summary: Login com usuário e senha
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login realizado
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/channels:
+    get:
+      operationId: listChannels
+      summary: Lista os canais de voz, em ordem de posição
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Canais
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChannelListResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /api/livekit/token:
+    post:
+      operationId: createLiveKitToken
+      summary: Emite o token de acesso à sala LiveKit de um canal
+      description: |
+        `voice` publica e assina. `spectator` é oculto, não publica e só assiste (Modo Espectador).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LiveKitTokenRequest'
+      responses:
+        '200':
+          description: Token emitido
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveKitTokenResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '413':
+          $ref: '#/components/responses/PayloadTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  responses:
+    BadRequest:
+      description: Requisição inválida
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Unauthorized:
+      description: Não autenticado ou credenciais inválidas
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    NotFound:
+      description: Recurso não encontrado
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    Conflict:
+      description: Conflito (nome de usuário já em uso)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    PayloadTooLarge:
+      description: Corpo da requisição maior que o limite
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    TooManyRequests:
+      description: Limite de tentativas excedido
+      headers:
+        Retry-After:
+          description: Segundos até a próxima tentativa
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Erro interno
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        details:
+          description: Detalhes opcionais (por exemplo, o campo inválido)
+    User:
+      type: object
+      required: [id, username, isAdmin, createdAt]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        username:
+          $ref: '#/components/schemas/Username'
+        isAdmin:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    Username:
+      type: string
+      minLength: 3
+      maxLength: 32
+      pattern: '^[a-zA-Z0-9_.-]+$'
+    RegisterRequest:
+      type: object
+      required: [inviteCode, username, password]
+      properties:
+        inviteCode:
+          type: string
+          minLength: 8
+          maxLength: 64
+        username:
+          $ref: '#/components/schemas/Username'
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          $ref: '#/components/schemas/Username'
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+    AuthResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        user:
+          $ref: '#/components/schemas/User'
+    Channel:
+      type: object
+      required: [id, name, position]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        position:
+          type: integer
+          minimum: 0
+    ChannelListResponse:
+      type: object
+      required: [channels]
+      properties:
+        channels:
+          type: array
+          items:
+            $ref: '#/components/schemas/Channel'
+    LiveKitRole:
+      type: string
+      enum: [voice, spectator]
+    LiveKitTokenRequest:
+      type: object
+      required: [channelId, role]
+      properties:
+        channelId:
+          type: string
+          minLength: 1
+          maxLength: 64
+        role:
+          $ref: '#/components/schemas/LiveKitRole'
+    LiveKitTokenResponse:
+      type: object
+      required: [token, url, roomName]
+      properties:
+        token:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          description: Endereço WebSocket do LiveKit que o cliente deve usar
+        roomName:
+          type: string
+          minLength: 1

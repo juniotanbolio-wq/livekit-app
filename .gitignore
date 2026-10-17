@@ -14,3 +14,4 @@ backend/server
 backend/*.exe
 frontend/.electron-second/
 frontend/.electron-third/
+backend/data/

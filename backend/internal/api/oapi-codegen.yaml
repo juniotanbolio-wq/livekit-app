@@ -1,0 +1,8 @@
+package: api
+output: api.gen.go
+generate:
+  models: true
+  std-http-server: true
+  strict-server: true
+  # Spec embutida: o middleware de validação lê o contrato do próprio binário, sem arquivo em disco.
+  embedded-spec: true

@@ -3,3 +3,4 @@ bin/
 .env
 *.db
 data/
+scripts/

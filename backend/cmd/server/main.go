@@ -1,10 +1,17 @@
 // Comando server: ponto de entrada do backend.
+//
+// Uso:
+//
+//	server [serve]               sobe a API HTTP (padrão)
+//	server seed                  garante os 7 canais de voz e o usuário admin (idempotente)
+//	server invite create [--hours N]   cria um convite de uso único e imprime o código
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -12,28 +19,87 @@ import (
 	"syscall"
 	"time"
 
+	"livekit-app/backend/internal/auth"
 	"livekit-app/backend/internal/config"
+	"livekit-app/backend/internal/db"
 	"livekit-app/backend/internal/httpapi"
+	"livekit-app/backend/internal/livekit"
+	"livekit-app/backend/internal/ratelimit"
+	"livekit-app/backend/internal/service"
 )
 
 func main() {
-	if err := run(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	err := run(ctx, os.Args[1:], os.Getenv, os.Stdout)
+	stop()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "erro fatal:", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
-	cfg, err := config.Load(os.Getenv)
+func run(ctx context.Context, args []string, getenv func(string) string, stdout io.Writer) error {
+	cfg, err := config.Load(getenv)
 	if err != nil {
 		return fmt.Errorf("configuração: %w", err)
 	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 
+	command := "serve"
+	if len(args) > 0 {
+		command = args[0]
+	}
+	switch command {
+	case "serve":
+		return serve(ctx, cfg, logger)
+	case "seed":
+		return seed(ctx, cfg, stdout)
+	case "invite":
+		return invite(ctx, cfg, args[1:], stdout)
+	default:
+		return fmt.Errorf("comando desconhecido %q (use serve, seed ou invite create)", command)
+	}
+}
+
+// openService abre o banco (aplicando migrações) e monta o serviço. O fechamento do banco fica com o chamador.
+func openService(ctx context.Context, cfg config.Config) (*service.Service, func() error, error) {
+	conn, err := db.Open(ctx, cfg.DatabasePath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("banco de dados: %w", err)
+	}
+	hasher, err := auth.NewHasher(auth.DefaultParams)
+	if err != nil {
+		return nil, nil, errors.Join(fmt.Errorf("hasher de senhas: %w", err), conn.Close())
+	}
+	return service.New(conn, hasher, time.Now), conn.Close, nil
+}
+
+func serve(ctx context.Context, cfg config.Config, logger *slog.Logger) (err error) {
+	svc, closeDB, err := openService(ctx, cfg)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, closeDB()) }()
+
+	limiter := ratelimit.New(cfg.AuthRateLimit, cfg.AuthRateWindow, time.Now)
+	handler, err := httpapi.NewHandler(httpapi.Deps{
+		Logger:         logger,
+		Service:        svc,
+		Tokens:         auth.NewTokens(cfg.JWTSecret, cfg.JWTTTL, time.Now),
+		LiveKit:        livekit.NewIssuer(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret, cfg.LiveKitPublicURL, cfg.LiveKitTokenTTL),
+		AuthLimiter:    limiter,
+		CORSOrigins:    cfg.CORSOrigins,
+		TrustedProxies: cfg.TrustedProxies,
+		MaxBodyBytes:   cfg.MaxBodyBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("montar roteador: %w", err)
+	}
+
 	// Os timeouts evitam que conexões lentas (slowloris) prendam goroutines indefinidamente.
 	srv := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           httpapi.NewHandler(logger),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -41,8 +107,17 @@ func run() error {
 		MaxHeaderBytes:    1 << 20,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	// A limpeza do rate limit para junto com o servidor; limiterDone garante que a goroutine terminou.
+	limiterCtx, cancelLimiter := context.WithCancel(ctx)
+	limiterDone := make(chan struct{})
+	go func() {
+		defer close(limiterDone)
+		limiter.Run(limiterCtx, time.Minute)
+	}()
+	defer func() {
+		cancelLimiter()
+		<-limiterDone
+	}()
 
 	// Canal com buffer 1: a goroutine de ListenAndServe nunca fica bloqueada ao devolver o erro.
 	serveErr := make(chan error, 1)
