@@ -181,7 +181,13 @@ func (e *env) register(username, password string) authBody {
 func TestHealth(t *testing.T) {
 	e := newEnv(t)
 	r := e.do("GET", "/health", "", nil)
-	if r.status != http.StatusOK || !strings.Contains(string(r.body), `"status":"ok"`) {
+	var health struct {
+		Status     string `json:"status"`
+		LivekitURL string `json:"livekitUrl"`
+	}
+	r.json(t, &health)
+	// O cliente usa livekitUrl para montar a CSP antes do login: precisa ser o mesmo endereço do token.
+	if r.status != http.StatusOK || health.Status != "ok" || health.LivekitURL != "ws://localhost:7880" {
 		t.Fatalf("resposta inesperada: %d %s", r.status, r.body)
 	}
 	if r := e.do("POST", "/health", "", nil); r.status != http.StatusMethodNotAllowed {

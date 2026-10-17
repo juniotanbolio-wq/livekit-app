@@ -178,11 +178,16 @@ components:
   schemas:
     HealthResponse:
       type: object
-      required: [status]
+      required: [status, livekitUrl]
       properties:
         status:
           type: string
           enum: [ok]
+        livekitUrl:
+          type: string
+          description: |
+            Endereço WebSocket público do LiveKit (o mesmo de LiveKitTokenResponse.url). O cliente o lê ao
+            validar o endereço do servidor para montar a CSP antes de qualquer login. Não é segredo.
     ErrorResponse:
       type: object
       required: [error]

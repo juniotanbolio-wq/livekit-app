@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { ConnectionState, type Room } from 'livekit-client';
-import { liveKitTokenResponseSchema } from '../../../api/types';
-import { errorMessage, request } from '../lib/api';
+import { createLiveKitToken, errorMessage } from '../lib/api';
 import {
   applySpectatorSubscriptions,
   listScreenShares,
@@ -182,11 +181,7 @@ export const useWatch = create<WatchState>()((set, get) => {
         return;
       }
       try {
-        const { token, url } = await request('/api/livekit/token', {
-          method: 'POST',
-          body: { channelId: target, role: 'spectator' },
-          schema: liveKitTokenResponseSchema,
-        });
+        const { token, url } = await createLiveKitToken(target, 'spectator');
         if (sequence !== reconcileSequence) {
           return;
         }

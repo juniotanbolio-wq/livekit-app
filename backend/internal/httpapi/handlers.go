@@ -24,8 +24,9 @@ type handlers struct {
 var _ api.StrictServerInterface = (*handlers)(nil)
 
 func (h *handlers) GetHealth(context.Context, api.GetHealthRequestObject) (api.GetHealthResponseObject, error) {
-	// Sem tocar em banco nem LiveKit: "vivo" não pode depender de dependências externas.
-	return api.GetHealth200JSONResponse{Status: api.Ok}, nil
+	// Sem tocar em banco nem LiveKit: "vivo" não pode depender de dependências externas. O endereço público do
+	// LiveKit é só configuração; o cliente precisa dele antes do login para liberar a origem na CSP.
+	return api.GetHealth200JSONResponse{Status: api.Ok, LivekitUrl: h.livekit.PublicURL()}, nil
 }
 
 func (h *handlers) Register(ctx context.Context, req api.RegisterRequestObject) (api.RegisterResponseObject, error) {

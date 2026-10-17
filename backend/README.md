@@ -60,7 +60,7 @@ Com o contêiner de produção rodando: `docker exec <contêiner> /server invite
 
 | Rota | Auth | Descrição |
 |---|---|---|
-| `GET /health` | não | Vivo (não toca em banco nem LiveKit) |
+| `GET /health` | não | Vivo (não toca em banco nem LiveKit) → `{status: "ok", livekitUrl}`. O cliente o usa para validar o endereço do servidor e descobrir o LiveKit público antes do login |
 | `POST /api/auth/register` | não | Cadastro com convite → `201 {token, user}` |
 | `POST /api/auth/login` | não | Login → `200 {token, user}` |
 | `GET /api/channels` | Bearer | Os 7 canais de voz, em ordem |

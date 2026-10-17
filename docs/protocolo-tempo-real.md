@@ -115,6 +115,17 @@ Os formatos exatos são os schemas `Ws*` de [contracts/openapi.yaml](../contract
 | `MENTION_SENDER_LIMIT` / `MENTION_RECIPIENT_LIMIT` | `5` / `5` | menções por janela |
 | `MENTION_WINDOW` | `30s` | janela dos limites de menção |
 
-## 5. Atrás do Caddy (R3)
+## 5. Cliente desktop (R2)
+
+Implementado em `frontend/src/renderer/src/lib/realtime.ts` (protocolo) e `stores/realtime.ts` (ligação com a interface).
+
+- Uma conexão por sessão: abre ao entrar (login, cadastro ou sessão salva) e fecha com `1000` ao sair. O token vai na 1ª mensagem.
+- Espera o `snapshot` por até 10 s; depois aplica cada evento só se `seq` for o anterior + 1. Repetido é ignorado; **salto fecha a conexão e reconecta** para receber um snapshot novo.
+- Queda (servidor reiniciado, rede, `1001`, `1008` que não seja de autenticação): reconecta com espera exponencial e *full jitter* (sorteio entre 0 e 1 s, 2 s, 4 s... até 30 s; zera a cada snapshot) e na hora em que o Windows avisa que a rede voltou. A interface mostra "Conectando..." / "Reconectando..." no topo da barra lateral.
+- `error` com `unauthorized`: a sessão acabou; o app volta ao login sem tentar de novo (o mesmo vale para `401` em qualquer chamada REST autenticada).
+- Menções saem com `ref` (UUID) e esperam `mention_sent` ou `error` com o mesmo `ref` por até 10 s. Ao receber `mention`, o app mostra um aviso interno e pede ao processo principal um toast do Windows com som (inclusive com a janela escondida na bandeja).
+- O botão "chamar atenção" fica nos participantes dos canais de voz (presença), já que o protocolo não lista quem só está com o app aberto.
+
+## 6. Atrás do Caddy (R3)
 
 O WebSocket e o webhook passam pelo mesmo backend. O webhook é chamado pelo LiveKit pela rede interna do Compose (`http://backend:8080/webhooks/livekit`), não pela internet: não precisa ser exposto no Caddy. `/ws` precisa de proxy com suporte a WebSocket (o Caddy faz isso por padrão) e os `TRUSTED_PROXIES` configurados.

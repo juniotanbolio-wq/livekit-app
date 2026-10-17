@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
-import { PRESENCE_POLL_INTERVAL_MS } from '../../../../api/types';
 import { selectChannel, useChannels } from '../../stores/channels';
-import { usePresence } from '../../stores/presence';
 import { VoiceView } from '../voice/VoiceView';
 import { ScreenSharePicker } from '../screen/ScreenSharePicker';
 import { StreamView } from '../stream/StreamView';
@@ -9,17 +7,7 @@ import { useScreenShare } from '../../stores/screen-share';
 import { useWatch } from '../../stores/watch';
 import { Sidebar } from './Sidebar';
 import { Spinner } from '../../components/Icons';
-
-function usePresencePolling() {
-  useEffect(() => {
-    const refresh = () => {
-      void usePresence.getState().refresh();
-    };
-    refresh();
-    const timer = window.setInterval(refresh, PRESENCE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, []);
-}
+import { MentionToasts } from '../mentions/MentionToasts';
 
 function CentralArea() {
   const channel = useChannels((state) => selectChannel(state, state.viewedChannelId));
@@ -60,8 +48,7 @@ export function MainLayout() {
   const load = useChannels((state) => state.load);
   const pickerOpen = useScreenShare((state) => state.pickerOpen);
 
-  usePresencePolling();
-
+  // A presença chega pelo WebSocket (stores/realtime.ts); só a lista de canais vem do REST.
   useEffect(() => {
     if (!hasChannels) {
       void load();
@@ -75,6 +62,7 @@ export function MainLayout() {
         <CentralArea />
       </main>
       {pickerOpen && <ScreenSharePicker />}
+      <MentionToasts />
     </div>
   );
 }

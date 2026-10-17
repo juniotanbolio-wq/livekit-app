@@ -1,7 +1,6 @@
 import { create } from 'zustand';
 import { ConnectionState, MediaDeviceFailure, type Room } from 'livekit-client';
-import { liveKitTokenResponseSchema } from '../../../api/types';
-import { errorMessage, request } from '../lib/api';
+import { createLiveKitToken, errorMessage } from '../lib/api';
 
 export type DeviceKind = 'audioinput' | 'videoinput' | 'audiooutput';
 
@@ -140,11 +139,8 @@ export const useVoice = create<VoiceState>()((set, get) => {
         await room.disconnect();
       }
       try {
-        const { token, url } = await request('/api/livekit/token', {
-          method: 'POST',
-          body: { channelId, role: 'voice' },
-          schema: liveKitTokenResponseSchema,
-        });
+        // A URL do LiveKit é a que o backend devolve junto com o token.
+        const { token, url } = await createLiveKitToken(channelId, 'voice');
         if (sequence !== joinSequence) {
           return;
         }

@@ -36,6 +36,9 @@ services:
       # O backend fala com o LiveKit pela rede interna; o cliente (fora do Docker) usa o endereço público.
       LIVEKIT_URL: http://livekit:7880
       LIVEKIT_PUBLIC_URL: '${LIVEKIT_PUBLIC_URL:-ws://localhost:7880}'
+      # Origens de navegador aceitas: o Vite do `npm run dev` (localhost e 127.0.0.1) e o app compilado (app://desktop).
+      # Qualquer outra origem recebe 403, inclusive no upgrade do WebSocket.
+      CORS_ORIGINS: '${CORS_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173,app://desktop}'
       SEED_ADMIN_USERNAME: '${SEED_ADMIN_USERNAME:-admin}'
       SEED_ADMIN_PASSWORD: '${SEED_ADMIN_PASSWORD:-}'
     ports:

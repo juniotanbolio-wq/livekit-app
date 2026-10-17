@@ -1,6 +1,5 @@
 import { create } from 'zustand';
-import { channelListResponseSchema, type Channel } from '../../../api/types';
-import { errorMessage, request } from '../lib/api';
+import { errorMessage, listChannels, type Channel } from '../lib/api';
 
 interface ChannelsState {
   channels: Channel[];
@@ -29,8 +28,7 @@ export const useChannels = create<ChannelsState>()((set, get) => ({
   async load() {
     set({ loading: true, error: null });
     try {
-      const { channels } = await request('/api/channels', { schema: channelListResponseSchema });
-      get().setChannels(channels);
+      get().setChannels(await listChannels());
     } catch (err) {
       set({ error: errorMessage(err) });
     } finally {

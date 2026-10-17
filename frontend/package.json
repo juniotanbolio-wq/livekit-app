@@ -10,11 +10,15 @@
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "generate": "node scripts/generate-api.mjs",
+    "generate:check": "node scripts/generate-api.mjs --check",
+    "e2e": "node scripts/e2e.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.24",
     "livekit-client": "^2.23.0",
+    "openapi-fetch": "^0.17.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "tslib": "^2.8.1",
@@ -22,26 +26,32 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^26.6.5",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.7.2",
     "electron-vite": "^6.0.0",
-    "tailwindcss": "^4.3.3",
-    "vite": "^8.3.4",
-    "@eslint/js": "^10.0.1",
-    "@types/node": "^26.6.5",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
     "globals": "^17.13.0",
+    "openapi-typescript": "^7.13.0",
     "prettier": "^3.9.10",
+    "tailwindcss": "^4.3.3",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.71.2",
+    "vite": "^8.3.4",
+    "yaml": "^2.9.1"
+  },
+  "overrides": {
+    "openapi-typescript": {
+      "typescript": "$typescript"
+    }
   },
   "engines": {
     "node": ">=22"
-  },
-  "type": "module"
+  }
 }

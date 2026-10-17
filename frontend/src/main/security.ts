@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative } from 'node:path';
 import { app, protocol, session, type WebContents } from 'electron';
 import type { MainConfig } from './config';
+import type { ServerSettings } from './settings-store';
 
 export const APP_SCHEME = 'app';
 export const APP_HOST = 'desktop';
@@ -68,13 +69,16 @@ function withSiblingProtocol(url: string): string[] {
   return origins;
 }
 
-export function buildCsp(config: MainConfig): string {
+// connect-src lista só o backend (REST + WebSocket) e o LiveKit (sinalização + /rtc/validate) salvos nas
+// configurações. Antes de o usuário escolher um servidor, só 'self': nada de rede além do próprio app.
+export function buildCsp(config: MainConfig, settings: ServerSettings): string {
   const connect = new Set<string>(["'self'"]);
-  for (const origin of withSiblingProtocol(config.serverUrl)) {
-    connect.add(origin);
-  }
-  for (const origin of withSiblingProtocol(config.liveKitUrl)) {
-    connect.add(origin);
+  for (const url of [settings.serverUrl, settings.liveKitUrl]) {
+    if (url) {
+      for (const origin of withSiblingProtocol(url)) {
+        connect.add(origin);
+      }
+    }
   }
   const scripts = ["'self'"];
   if (config.rendererDevUrl) {
@@ -99,7 +103,15 @@ export function buildCsp(config: MainConfig): string {
   ].join('; ');
 }
 
-export function registerAppProtocol(rendererDir: string, csp: string): void {
+// A CSP muda quando o usuário troca de servidor. Ela vale por documento, então quem troca o servidor
+// recarrega a página logo em seguida para a política nova entrar em vigor.
+let currentCsp = "default-src 'none'";
+
+export function updateCsp(config: MainConfig, settings: ServerSettings): void {
+  currentCsp = buildCsp(config, settings);
+}
+
+export function registerAppProtocol(rendererDir: string): void {
   protocol.handle(APP_SCHEME, async (request) => {
     const url = new URL(request.url);
     if (url.host !== APP_HOST) {
@@ -118,7 +130,7 @@ export function registerAppProtocol(rendererDir: string, csp: string): void {
         'X-Content-Type-Options': 'nosniff',
       });
       if (extname(filePath).toLowerCase() === '.html') {
-        headers.set('Content-Security-Policy', csp);
+        headers.set('Content-Security-Policy', currentCsp);
       }
       return new Response(body, { status: 200, headers });
     } catch {
@@ -127,7 +139,7 @@ export function registerAppProtocol(rendererDir: string, csp: string): void {
   });
 }
 
-export function applySessionSecurity(config: MainConfig, csp: string): void {
+export function applySessionSecurity(config: MainConfig): void {
   const ses = session.defaultSession;
   const ownOrigin = appOrigin(config);
 
@@ -140,7 +152,7 @@ export function applySessionSecurity(config: MainConfig, csp: string): void {
       callback({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': [csp],
+          'Content-Security-Policy': [currentCsp],
         },
       });
     });

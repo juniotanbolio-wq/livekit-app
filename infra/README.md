@@ -5,7 +5,7 @@ LiveKit Server (SFU de mídia) e, a partir da fase R3, Caddy (TLS), Compose de p
 Hoje contém apenas o ambiente local de desenvolvimento (LiveKit + backend):
 
 ```powershell
-Copy-Item .env.example .env   # preencha LIVEKIT_API_SECRET e JWT_SECRET (32+ caracteres cada)
+Copy-Item .env.example .env   # preencha LIVEKIT_API_SECRET, JWT_SECRET (32+ caracteres cada) e SEED_ADMIN_PASSWORD
 docker compose up -d --build
 docker compose exec backend /server seed             # 7 canais + admin (usa SEED_ADMIN_*)
 docker compose exec backend /server invite create    # código de convite de uso único
@@ -13,7 +13,9 @@ docker compose logs -f
 docker compose down
 ```
 
-Portas: 7880 (sinalização do LiveKit), 7881/TCP (reserva), 7882/UDP (mídia) e 8080 (backend, só em 127.0.0.1).
+Portas: 7880 (sinalização do LiveKit), 7881/TCP (reserva), 7882/UDP (mídia) e 8080 (backend, só em 127.0.0.1). No app, o endereço do servidor é `http://localhost:8080` (pré-preenchido na primeira execução em desenvolvimento).
+
+O backend aceita as origens de navegador do Vite (`http://localhost:5173`, `http://127.0.0.1:5173`) e do app compilado (`app://desktop`); para mudar, defina `CORS_ORIGINS` no `.env`. O `frontend\scripts\e2e.mjs` usa este Compose (reinicia o contêiner `backend` e deixa usuários `e2e_*` no banco de desenvolvimento).
 
 - `docker-compose.yml`: serviços `livekit` e `backend` (build de `../backend`, banco SQLite no volume `backend-data`)
 - `livekit.yaml`: configuração do LiveKit, incluindo o **webhook** que avisa o backend (presença e quem está transmitindo)

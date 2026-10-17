@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Channel } from '../../../../api/types';
+import type { Channel } from '../../lib/api';
 import { useVoice } from '../../stores/voice';
 import { useWatch } from '../../stores/watch';
 import {

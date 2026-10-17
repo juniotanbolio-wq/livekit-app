@@ -24,10 +24,17 @@ A v1 (backend Node + Electron + chat) está preservada na tag `v1-node`.
 ## Início rápido
 
 ```powershell
-# Frontend
-cd frontend
+# Servidor de desenvolvimento (LiveKit + backend)
+cd infra
+docker compose up -d --build
+docker compose exec backend /server seed
+
+# Frontend (na primeira execução o app pede o endereço do servidor: http://localhost:8080)
+cd ..\frontend
 npm install
 npm run typecheck; npm run lint; npm run build
+npm run dev
+npm run e2e          # aceite com duas instâncias reais do app
 
 # Backend (tudo via Docker)
 cd ..\backend
@@ -39,4 +46,4 @@ Detalhes de cada parte estão no README da respectiva pasta.
 
 ## Estado
 
-Fases R0 (reestruturação), R1a (backend Go: identidade, canais e tokens LiveKit) e R1b (tempo real: webhooks do LiveKit, presença, WebSocket e menções) concluídas. O app segue sem backend conectado até a fase R2, que troca o polling de presença pelo WebSocket ([protocolo](docs/protocolo-tempo-real.md)).
+Fases R0 (reestruturação), R1a (backend Go: identidade, canais e tokens LiveKit), R1b (tempo real: webhooks do LiveKit, presença, WebSocket e menções) e R2 (frontend conectado ao backend Go: tipos gerados do contrato, endereço do servidor na tela, presença e "chamar atenção" pelo WebSocket, notificação do Windows e bandeja) concluídas. Próxima: R3 (servidor caseiro com Caddy e TLS).

@@ -361,7 +361,7 @@ try {
 
     Write-Host "`n=== Fluxo de identidade ===" -ForegroundColor Cyan
     $r = Invoke-Api GET "$api/health"
-    Check 'GET /health' ($r.Status -eq 200 -and $r.Body.status -eq 'ok')
+    Check 'GET /health (com livekitUrl público)' ($r.Status -eq 200 -and $r.Body.status -eq 'ok' -and $r.Body.livekitUrl -eq "ws://localhost:$lkPort") $r.Raw
 
     $seedOut = (docker exec $apiName /server seed) -join "`n"
     Check 'server seed (7 canais + admin)' ($LASTEXITCODE -eq 0 -and $seedOut -match 'Canais garantidos: 7') $seedOut

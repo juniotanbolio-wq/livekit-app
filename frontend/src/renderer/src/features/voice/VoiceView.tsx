@@ -1,4 +1,4 @@
-import type { Channel } from '../../../../api/types';
+import type { Channel, PresenceParticipant } from '../../lib/api';
 import { usePresence } from '../../stores/presence';
 import { useVoice } from '../../stores/voice';
 import { EyeIcon, LiveBadge, SpeakerIcon, Spinner, XIcon } from '../../components/Icons';
@@ -6,6 +6,10 @@ import { useWatch } from '../../stores/watch';
 import { useLiveChannelIds } from '../stream/useLiveChannels';
 import { VoiceControls } from './VoiceControls';
 import { VoiceGrid } from './VoiceGrid';
+
+// Referência fixa: um `[]` novo a cada leitura faria o Zustand achar que o estado mudou e renderizar em
+// laço (erro React #185) enquanto o canal ainda não aparece na presença.
+const NO_PARTICIPANTS: PresenceParticipant[] = [];
 
 function VoiceError() {
   const error = useVoice((state) => state.error);
@@ -35,7 +39,7 @@ function NotConnected({ channel }: { channel: Channel }) {
       state.connection !== 'idle' && state.channelId !== null && state.channelId !== channel.id,
   );
   const watch = useWatch((state) => state.watch);
-  const participants = usePresence((state) => state.byChannel[channel.id] ?? []);
+  const participants = usePresence((state) => state.byChannel[channel.id] ?? NO_PARTICIPANTS);
   const live = useLiveChannelIds().has(channel.id);
   const sharers = participants.filter((participant) => participant.isScreenSharing);
 

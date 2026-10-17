@@ -11,7 +11,7 @@ import {
   MonitorOffIcon,
   SettingsIcon,
 } from '../../components/Icons';
-import { DeviceSettings } from '../voice/DeviceSettings';
+import { SettingsDialog } from '../settings/SettingsDialog';
 import { useScreenShareToggle } from '../screen/useScreenShareToggle';
 
 function PanelButton({
@@ -92,14 +92,14 @@ export function UserPanel() {
         >
           {screen.live ? <MonitorOffIcon size={18} /> : <MonitorIcon size={18} />}
         </PanelButton>
-        <PanelButton title="Dispositivos" onClick={() => setSettingsOpen(true)}>
+        <PanelButton title="Configurações" onClick={() => setSettingsOpen(true)}>
           <SettingsIcon size={18} />
         </PanelButton>
         <PanelButton title="Sair da conta" onClick={() => void logout()}>
           <LogOutIcon size={18} />
         </PanelButton>
       </div>
-      {settingsOpen && <DeviceSettings onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </>
   );
 }

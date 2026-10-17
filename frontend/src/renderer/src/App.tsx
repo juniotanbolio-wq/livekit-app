@@ -6,6 +6,7 @@ import { useSession } from './stores/session';
 import { VoiceProvider } from './voice/VoiceProvider';
 import { SpectatorProvider } from './voice/SpectatorProvider';
 import { DebugPanel } from './features/debug/DebugPanel';
+import { ServerSetupScreen } from './features/server/ServerSetupScreen';
 
 function Screens() {
   const status = useSession((state) => state.status);
@@ -16,6 +17,9 @@ function Screens() {
         <Spinner size={28} />
       </div>
     );
+  }
+  if (status === 'needs-server') {
+    return <ServerSetupScreen />;
   }
   return status === 'authenticated' ? (
     <>

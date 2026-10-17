@@ -3,19 +3,17 @@ import { app } from 'electron';
 import { z } from 'zod';
 
 const httpUrlSchema = z.url({ protocol: /^https?$/ });
-const wsUrlSchema = z.url({ protocol: /^wss?$/ });
 
-const envSchema = z.object({
-  LIVEKIT_APP_SERVER_URL: httpUrlSchema.default('http://localhost:3000'),
-  LIVEKIT_APP_LIVEKIT_URL: wsUrlSchema.default('ws://localhost:7880'),
-});
+// Backend do Compose de desenvolvimento (infra/docker-compose.yml).
+const DEV_SERVER_URL = 'http://localhost:8080';
 
 export interface MainConfig {
-  serverUrl: string;
-  liveKitUrl: string;
   rendererDevUrl: string | null;
   userDataDir: string | null;
   multiInstance: boolean;
+  // Sugestão para a tela de primeira execução. Fora do pacote aponta para o backend local; empacotado fica
+  // vazio até a R4 trazer o endereço do servidor pré-preenchido. O endereço de verdade fica em settings.json.
+  defaultServerUrl: string | null;
 }
 
 function readArg(name: string): string | null {
@@ -40,16 +38,11 @@ function resolveRendererDevUrl(): string | null {
 }
 
 export function loadMainConfig(): MainConfig {
-  const parsed = envSchema.safeParse(process.env);
-  if (!parsed.success) {
-    throw new Error(`Configuração inválida:\n${z.prettifyError(parsed.error)}`);
-  }
   const userDataArg = readArg('user-data-dir');
   return {
-    serverUrl: parsed.data.LIVEKIT_APP_SERVER_URL.replace(/\/+$/, ''),
-    liveKitUrl: parsed.data.LIVEKIT_APP_LIVEKIT_URL.replace(/\/+$/, ''),
     rendererDevUrl: resolveRendererDevUrl(),
     userDataDir: userDataArg ? resolve(userDataArg) : null,
     multiInstance: hasFlag('multi-instance'),
+    defaultServerUrl: app.isPackaged ? null : DEV_SERVER_URL,
   };
 }

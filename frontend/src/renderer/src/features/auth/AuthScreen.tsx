@@ -1,16 +1,17 @@
 import { useState, type FormEvent } from 'react';
 import {
-  inviteCodeSchema,
-  passwordSchema,
+  INVITE_CODE_MAX_LENGTH,
+  INVITE_CODE_MIN_LENGTH,
   PASSWORD_MAX_LENGTH,
   PASSWORD_MIN_LENGTH,
-  usernameSchema,
   USERNAME_MAX_LENGTH,
   USERNAME_MIN_LENGTH,
-} from '../../../../api/types';
+  USERNAME_PATTERN,
+} from '../../../../generated/contract';
 import { ApiError } from '../../lib/api';
 import { useSession } from '../../stores/session';
 import { Spinner } from '../../components/Icons';
+import { ServerSetupScreen } from '../server/ServerSetupScreen';
 
 type Mode = 'login' | 'register';
 type Field = 'inviteCode' | 'username' | 'password' | 'confirm';
@@ -23,15 +24,27 @@ const MESSAGES = {
   confirm: 'As senhas não conferem',
 };
 
+function within(value: string, min: number, max: number): boolean {
+  return value.length >= min && value.length <= max;
+}
+
+// Mesmas regras do contrato (limites gerados de contracts/openapi.yaml); o servidor valida de novo.
 function validate(mode: Mode, values: Record<Field, string>): FieldErrors {
   const errors: FieldErrors = {};
-  if (mode === 'register' && !inviteCodeSchema.safeParse(values.inviteCode).success) {
+  if (
+    mode === 'register' &&
+    !within(values.inviteCode.trim(), INVITE_CODE_MIN_LENGTH, INVITE_CODE_MAX_LENGTH)
+  ) {
     errors.inviteCode = MESSAGES.inviteCode;
   }
-  if (!usernameSchema.safeParse(values.username).success) {
+  const username = values.username.trim();
+  if (
+    !within(username, USERNAME_MIN_LENGTH, USERNAME_MAX_LENGTH) ||
+    !USERNAME_PATTERN.test(username)
+  ) {
     errors.username = MESSAGES.username;
   }
-  if (!passwordSchema.safeParse(values.password).success) {
+  if (!within(values.password, PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH)) {
     errors.password = MESSAGES.password;
   }
   if (mode === 'register' && values.password !== values.confirm) {
@@ -102,6 +115,8 @@ export function AuthScreen() {
   const [errors, setErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [editingServer, setEditingServer] = useState(false);
+  const serverUrl = useSession((state) => state.serverUrl);
   const notice = useSession((state) => state.notice);
   const login = useSession((state) => state.login);
   const register = useSession((state) => state.register);
@@ -146,8 +161,12 @@ export function AuthScreen() {
     }
   };
 
+  if (editingServer) {
+    return <ServerSetupScreen onCancel={() => setEditingServer(false)} />;
+  }
+
   return (
-    <div className="flex h-full items-center justify-center bg-zinc-900 p-6">
+    <div className="flex h-full items-center justify-center bg-zinc-900 p-6" data-screen="auth">
       <form
         onSubmit={onSubmit}
         noValidate
@@ -232,6 +251,17 @@ export function AuthScreen() {
             className="text-indigo-400 hover:underline"
           >
             {mode === 'login' ? 'Cadastre-se' : 'Entrar'}
+          </button>
+        </p>
+
+        <p className="truncate border-t border-zinc-700 pt-3 text-center text-xs text-zinc-500">
+          Servidor: <span data-current-server>{serverUrl}</span> ·{' '}
+          <button
+            type="button"
+            onClick={() => setEditingServer(true)}
+            className="text-indigo-400 hover:underline"
+          >
+            Alterar
           </button>
         </p>
       </form>
