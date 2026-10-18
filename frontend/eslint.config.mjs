@@ -27,5 +27,12 @@ export default tseslint.config(
     plugins: { 'react-hooks': reactHooks },
     rules: reactHooks.configs.recommended.rules,
   },
+  {
+    // Processadores de AudioWorklet: rodam na thread de áudio, sem DOM e sem Node.
+    files: ['src/renderer/**/*.worklet.js'],
+    languageOptions: {
+      globals: { ...globals.audioWorklet },
+    },
+  },
   prettier,
 );

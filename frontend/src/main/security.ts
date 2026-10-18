@@ -80,7 +80,9 @@ export function buildCsp(config: MainConfig, settings: ServerSettings): string {
       }
     }
   }
-  const scripts = ["'self'"];
+  // 'wasm-unsafe-eval' permite só compilar WebAssembly (o RNNoise da supressão avançada de ruído roda em WASM
+  // dentro de um AudioWorklet). Não libera eval() nem new Function() de texto: o binário vem do próprio app.
+  const scripts = ["'self'", "'wasm-unsafe-eval'"];
   if (config.rendererDevUrl) {
     for (const origin of withSiblingProtocol(config.rendererDevUrl)) {
       connect.add(origin);

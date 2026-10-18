@@ -41,6 +41,8 @@ function HeaderButton({
   );
 }
 
+// Player da transmissão assistida. Montado = player visível: só então o vídeo da tela é pedido ao SFU
+// (setPlayerVisible -> setEnabled na assinatura); ao sair desta tela o recebimento pausa.
 export function StreamView({ channel }: { channel: Channel }) {
   const streams = useWatch((state) => state.streams);
   const selectedIdentity = useWatch((state) => state.selectedIdentity);
@@ -122,7 +124,8 @@ export function StreamView({ channel }: { channel: Channel }) {
               ))}
             </select>
           )}
-          {mode === 'spectator' && selected?.hasAudio && (
+          {/* Áudio da transmissão: assinado só enquanto ligado (nos dois modos), com volume próprio. */}
+          {selected?.hasAudio && (
             <>
               <HeaderButton
                 title={

@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { ScreenSource, ScreenSourceKind } from '../../../../shared/desktop-api';
 import { errorMessage } from '../../lib/api';
+import { describeDecision, resolveAutoCodec } from '../../lib/codec-selection';
 import {
   SCREEN_CODECS,
   SCREEN_QUALITIES,
   SCREEN_QUALITY_IDS,
-  isScreenCodec,
+  isScreenCodecChoice,
   isScreenQualityId,
 } from '../../lib/screen-presets';
 import { useScreenShare } from '../../stores/screen-share';
@@ -36,6 +37,23 @@ export function ScreenSharePicker() {
   const [includeAudio, setIncludeAudio] = useState(false);
 
   const [reloadKey, setReloadKey] = useState(0);
+  const [autoPreview, setAutoPreview] = useState<string | null>(null);
+
+  // Mostra antes de compartilhar o que o "Automático" vai escolher nesta máquina.
+  useEffect(() => {
+    if (codec !== 'auto') {
+      return;
+    }
+    let cancelled = false;
+    void resolveAutoCodec().then((decision) => {
+      if (!cancelled) {
+        setAutoPreview(describeDecision(decision));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [codec]);
 
   useEffect(() => {
     let cancelled = false;
@@ -188,6 +206,7 @@ export function ScreenSharePicker() {
             </span>
             <select
               value={quality}
+              data-screen-quality
               onChange={(event) => {
                 if (isScreenQualityId(event.target.value)) {
                   setQuality(event.target.value);
@@ -208,8 +227,9 @@ export function ScreenSharePicker() {
             </span>
             <select
               value={codec}
+              data-screen-codec
               onChange={(event) => {
-                if (isScreenCodec(event.target.value)) {
+                if (isScreenCodecChoice(event.target.value)) {
                   setCodec(event.target.value);
                 }
               }}
@@ -221,6 +241,11 @@ export function ScreenSharePicker() {
                 </option>
               ))}
             </select>
+            {codec === 'auto' && (
+              <span className="mt-1 block text-xs text-zinc-400" data-codec-preview>
+                {autoPreview ? `Será usado: ${autoPreview}` : 'Verificando o codificador...'}
+              </span>
+            )}
           </label>
         </div>
 
@@ -229,6 +254,7 @@ export function ScreenSharePicker() {
             <input
               type="checkbox"
               checked={includeAudio}
+              data-include-audio
               disabled={!loopbackSupported}
               onChange={(event) => setIncludeAudio(event.target.checked)}
               className="h-4 w-4 accent-indigo-500"

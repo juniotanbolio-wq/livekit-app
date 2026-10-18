@@ -3,11 +3,13 @@ import { XIcon } from '../../components/Icons';
 import { useSession } from '../../stores/session';
 import { ServerAddressForm } from '../server/ServerAddressForm';
 import { DeviceSettingsPanel } from '../voice/DeviceSettings';
+import { AudioSettingsPanel } from './AudioSettings';
 
-type Tab = 'devices' | 'server';
+type Tab = 'devices' | 'audio' | 'server';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'devices', label: 'Dispositivos' },
+  { id: 'audio', label: 'Áudio' },
   { id: 'server', label: 'Servidor' },
 ];
 
@@ -93,7 +95,9 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
             </button>
           ))}
         </div>
-        {tab === 'devices' ? <DeviceSettingsPanel /> : <ServerPanel />}
+        {tab === 'devices' && <DeviceSettingsPanel />}
+        {tab === 'audio' && <AudioSettingsPanel />}
+        {tab === 'server' && <ServerPanel />}
       </div>
     </div>
   );

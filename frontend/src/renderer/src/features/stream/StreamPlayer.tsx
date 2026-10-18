@@ -2,6 +2,8 @@ import { isTrackReference, useTracks, VideoTrack } from '@livekit/components-rea
 import { Track, type Room } from 'livekit-client';
 import { Spinner } from '../../components/Icons';
 
+// Vídeo da tela de `identity` na sala dada (voz ou espectador). onlySubscribed: false para mostrar "Carregando"
+// enquanto a assinatura sob demanda ainda não chegou. object-contain: a imagem é a 1080p inteira, sem corte.
 export function StreamPlayer({
   room,
   identity,

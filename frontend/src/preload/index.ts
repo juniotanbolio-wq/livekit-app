@@ -3,6 +3,7 @@ import {
   IpcChannel,
   type DesktopApi,
   type DesktopConfig,
+  type DiagnosticsInfo,
   type ScreenSource,
   type SetServerResult,
 } from '../shared/desktop-api';
@@ -22,6 +23,7 @@ const api: DesktopApi = {
     ipcRenderer.invoke(IpcChannel.screenListSources) as Promise<ScreenSource[]>,
   selectScreenSource: (sourceId, includeAudio) =>
     ipcRenderer.invoke(IpcChannel.screenSelectSource, { sourceId, includeAudio }) as Promise<void>,
+  getDiagnostics: () => ipcRenderer.invoke(IpcChannel.diagnosticsGet) as Promise<DiagnosticsInfo>,
 };
 
 // contextBridge copia os valores entre mundos isolados, em vez de compartilhar referências.

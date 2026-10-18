@@ -7,7 +7,7 @@ import {
   type TrackReferenceOrPlaceholder,
 } from '@livekit/components-react';
 import { Track } from 'livekit-client';
-import { LiveBadge, MicOffIcon } from '../../components/Icons';
+import { EyeIcon, LiveBadge, MicOffIcon, MonitorIcon } from '../../components/Icons';
 import { useWatch } from '../../stores/watch';
 
 function gridColumns(count: number): string {
@@ -60,6 +60,10 @@ function Tile({ trackRef }: { trackRef: TrackReferenceOrPlaceholder }) {
   );
 }
 
+// Transmissão de outra pessoa: só um cartão, sem vídeo. A tela não é assinada até o clique em "Assistir"
+// (stores/watch.ts); sem prévia, quem só está na voz não gasta banda nem decodifica 1080p, e o dynacast
+// deixa o emissor parar de codificar quando ninguém assiste. A própria tela mostra a prévia local, que não
+// passa pela rede.
 function ScreenTile({
   trackRef,
   channelId,
@@ -73,30 +77,35 @@ function ScreenTile({
   const isLocal = participant.isLocal;
 
   return (
-    <button
-      type="button"
+    <div
       data-tile="screen"
       data-identity={participant.identity}
-      disabled={isLocal}
-      title={isLocal ? 'Sua tela' : `Assistir à tela de ${name}`}
-      onClick={() => watch(channelId, participant.identity)}
-      className="group relative flex aspect-video min-h-0 items-center justify-center overflow-hidden rounded-lg bg-black ring-2 ring-red-500/70 enabled:hover:ring-red-400"
+      className="relative flex aspect-video min-h-0 flex-col items-center justify-center gap-3 overflow-hidden rounded-lg bg-black ring-2 ring-red-500/70"
     >
-      {isTrackReference(trackRef) ? (
-        <VideoTrack trackRef={trackRef} className="h-full w-full object-contain" />
-      ) : null}
+      {isLocal && isTrackReference(trackRef) ? (
+        <VideoTrack trackRef={trackRef} className="absolute inset-0 h-full w-full object-contain" />
+      ) : (
+        <>
+          <MonitorIcon size={36} className="text-zinc-500" />
+          <button
+            type="button"
+            data-watch-identity={participant.identity}
+            title={`Assistir à tela de ${name}`}
+            onClick={() => watch(channelId, participant.identity)}
+            className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500"
+          >
+            <EyeIcon size={16} />
+            Assistir
+          </button>
+        </>
+      )}
       <div className="absolute top-2 left-2">
         <LiveBadge />
       </div>
       <div className="absolute bottom-2 left-2 rounded bg-black/60 px-2 py-0.5 text-xs text-white">
         {isLocal ? 'Sua tela' : `Tela de ${name}`}
       </div>
-      {!isLocal && (
-        <div className="absolute inset-0 hidden items-center justify-center bg-black/40 text-sm font-medium text-white group-hover:flex">
-          Assistir em tela grande
-        </div>
-      )}
-    </button>
+    </div>
   );
 }
 

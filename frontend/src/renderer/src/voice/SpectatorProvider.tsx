@@ -1,9 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { AudioTrack, isTrackReference, useTracks } from '@livekit/components-react';
 import {
   Room,
   RoomEvent,
-  Track,
   type ConnectionState,
   type RemoteParticipant,
   type RemoteTrack,
@@ -12,39 +10,20 @@ import {
 import { useSession } from '../stores/session';
 import { useVoice } from '../stores/voice';
 import { useWatch } from '../stores/watch';
-import { isAllowedSpectatorSubscription } from './spectator-subscriptions';
+import { StreamAudio } from './StreamAudio';
+import { isAllowedSpectatorSubscription } from './subscriptions';
 
 // Segunda conexão (identidade `<id>#spectator`, hidden, sem publicar), usada só para assistir
-// telas. As assinaturas são feitas faixa a faixa (stores/watch.ts): nunca assinamos microfone
+// telas. As assinaturas são feitas faixa a faixa (voice/subscriptions.ts): nunca assinamos microfone
 // ou câmera do canal assistido.
 function createSpectatorRoom(): Room {
   return new Room({
     // adaptiveStream desligado: ele reduz a qualidade conforme o tamanho do elemento <video>,
     // e queremos sempre a camada mais alta da tela (1080p60), mesmo com a janela pequena.
     adaptiveStream: false,
+    // dynacast é do lado de quem publica; o espectador não publica nada.
     dynacast: false,
   });
-}
-
-// Áudio do stream (loopback do transmissor): opcional, só da transmissão selecionada e
-// silenciado junto com o "ensurdecer" da voz.
-function SpectatorAudio({ room }: { room: Room }) {
-  const selectedIdentity = useWatch((state) => state.selectedIdentity);
-  const audioEnabled = useWatch((state) => state.audioEnabled);
-  const volume = useWatch((state) => state.volume);
-  const deafened = useVoice((state) => state.deafened);
-  const tracks = useTracks([Track.Source.ScreenShareAudio], { room, onlySubscribed: true });
-
-  if (!audioEnabled) {
-    return null;
-  }
-  const trackRef = tracks.find(
-    (item) => item.participant.identity === selectedIdentity && isTrackReference(item),
-  );
-  if (!trackRef || !isTrackReference(trackRef)) {
-    return null;
-  }
-  return <AudioTrack trackRef={trackRef} volume={volume} muted={deafened} />;
 }
 
 export function SpectatorProvider({ children }: { children: ReactNode }) {
@@ -123,7 +102,7 @@ export function SpectatorProvider({ children }: { children: ReactNode }) {
 
   return (
     <>
-      <SpectatorAudio room={room} />
+      <StreamAudio room={room} />
       {children}
     </>
   );

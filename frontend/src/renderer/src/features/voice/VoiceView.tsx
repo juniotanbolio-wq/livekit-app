@@ -19,7 +19,9 @@ function VoiceError() {
   }
   return (
     <div className="mx-4 mt-3 flex items-center gap-3 rounded bg-red-500/15 px-3 py-2 text-sm text-red-300">
-      <span className="flex-1">{error}</span>
+      <span className="flex-1" data-voice-error>
+        {error}
+      </span>
       <button
         type="button"
         title="Fechar"
@@ -58,36 +60,43 @@ function NotConnected({ channel }: { channel: Channel }) {
                 participants.length === 1 ? 'está' : 'estão'
               } aqui`}
         </p>
-        {sharers.length > 0 && (
-          <p className="mt-1 text-sm text-zinc-300">
-            Transmitindo: {sharers.map((participant) => participant.username).join(', ')}
-          </p>
-        )}
         {inOtherVoice && (
           <p className="mt-1 text-xs text-zinc-500">
             Você está na voz de outro canal. Assistir não tira você de lá.
           </p>
         )}
       </div>
-      <div className="flex gap-3">
-        <button
-          type="button"
-          onClick={() => void join(channel.id)}
-          className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
-        >
-          Entrar na voz
-        </button>
-        <button
-          type="button"
-          disabled={!live}
-          title={live ? undefined : 'Não há transmissão ao vivo neste canal'}
-          onClick={() => watch(channel.id)}
-          className="flex items-center gap-2 rounded-md bg-sky-600 px-4 py-2 text-sm font-medium text-white hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-sky-600"
-        >
-          <EyeIcon size={16} />
-          Assistir transmissão
-        </button>
-      </div>
+      {/* Uma linha por transmissão ao vivo (presença do WebSocket). Assistir daqui abre o Modo Espectador:
+          só a tela é assinada, nunca microfones ou câmeras do canal. */}
+      {sharers.length > 0 && (
+        <ul className="w-full max-w-sm space-y-2" data-live-list>
+          {sharers.map((participant) => (
+            <li
+              key={participant.userId}
+              className="flex items-center gap-3 rounded-md bg-zinc-900/60 px-3 py-2 text-left"
+            >
+              <LiveBadge />
+              <span className="flex-1 truncate text-sm">Tela de {participant.username}</span>
+              <button
+                type="button"
+                data-watch-identity={participant.userId}
+                onClick={() => watch(channel.id, participant.userId)}
+                className="flex items-center gap-2 rounded-md bg-sky-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-sky-500"
+              >
+                <EyeIcon size={16} />
+                Assistir
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        onClick={() => void join(channel.id)}
+        className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
+      >
+        Entrar na voz
+      </button>
     </div>
   );
 }

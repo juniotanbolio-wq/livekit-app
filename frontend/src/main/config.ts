@@ -13,7 +13,12 @@ export interface MainConfig {
   multiInstance: boolean;
   // Sugestão para a tela de primeira execução. Fora do pacote aponta para o backend local; empacotado fica
   // vazio até a R4 trazer o endereço do servidor pré-preenchido. O endereço de verdade fica em settings.json.
+  // `--default-server-url=` troca a sugestão (aceite isolado e "Iniciar teste"); é só o valor inicial do
+  // campo: o processo principal ainda valida o servidor com GET /health antes de salvar.
   defaultServerUrl: string | null;
+  // `--no-hw-encode-flags`: não liga as features do Chromium para codificação de vídeo por hardware
+  // (main/media-flags.ts). Serve para medir com e sem elas e para contornar driver de GPU com defeito.
+  hwEncodeFlags: boolean;
 }
 
 function readArg(name: string): string | null {
@@ -37,12 +42,21 @@ function resolveRendererDevUrl(): string | null {
   return httpUrlSchema.parse(candidate);
 }
 
+function resolveDefaultServerUrl(): string | null {
+  const candidate = readArg('default-server-url');
+  if (candidate) {
+    return httpUrlSchema.parse(candidate);
+  }
+  return app.isPackaged ? null : DEV_SERVER_URL;
+}
+
 export function loadMainConfig(): MainConfig {
   const userDataArg = readArg('user-data-dir');
   return {
     rendererDevUrl: resolveRendererDevUrl(),
     userDataDir: userDataArg ? resolve(userDataArg) : null,
     multiInstance: hasFlag('multi-instance'),
-    defaultServerUrl: app.isPackaged ? null : DEV_SERVER_URL,
+    defaultServerUrl: resolveDefaultServerUrl(),
+    hwEncodeFlags: !hasFlag('no-hw-encode-flags'),
   };
 }

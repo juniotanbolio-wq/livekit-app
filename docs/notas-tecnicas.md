@@ -59,6 +59,71 @@ Detalhes de implementação, decisões por fase e pegadinhas conhecidas. O `CLAU
 - "Chamar atenção" (R2): só para quem aparece num canal de voz; mensagem opcional (140 runas); erros mapeados (offline, limite com os segundos do servidor). Menção recebida: aviso no app + toast do Windows com som pelo main (`Notification`, `silent:false`, `flashFrame`; loga `notificação de menção exibida`). *Decisão revista na Fase A: passar a valer para qualquer usuário conectado ao WebSocket.*
 - Bandeja: o X esconde, "Abrir"/"Sair" no ícone (provisório, desenhado em código até a R4), `backgroundThrottling: false`, `setAppUserModelId`.
 
+### Decisões da Fase Q (qualidade de áudio e vídeo)
+
+Números e checklist de teste real em [medicoes.md](medicoes.md).
+
+Codificação por GPU (`src/main/media-flags.ts`):
+- Antes da Fase Q, tudo saía em software no Chromium 152 do Windows: H.264 no OpenH264, VP8 no libvpx e AV1 no libaom.
+- O LiveKit negocia H.264 Constrained Baseline (`42e01f`), e no Windows o Chromium só entrega esse perfil ao codificador da GPU com a feature `PlatformH264CbpEncoding`, desligada por padrão.
+- O processo principal liga, antes do `ready`, a feature `PlatformH264CbpEncoding`. Ele a junta às `--enable-features` que já vierem, e `--no-hw-encode-flags` a desliga.
+- `WebRtcAV1HWEncode` e `D3D12VideoEncodeAcceleratorL1T3` foram testadas e deixadas de fora: com elas o AV1 continuou em `libaom` (L1T1 e L1T3, RX 9070 XT, Chromium 152). Para testar em outra GPU, passe-as em `--enable-features` ao abrir o app.
+- Resultado na RX 9070 XT: `SimulcastEncoderAdapter (MediaFoundationVideoEncodeAccelerator (AMDh264Encoder) ×3)`.
+
+Codec automático (`lib/codec-selection.ts`):
+- Ordem: H.264 HW > AV1 HW > H.264 SW.
+- Vale primeiro o resultado já medido nesta máquina, gravado no localStorage por versão do Chromium + GPU + driver; sem ele, a previsão de `navigator.mediaCapabilities.encodingInfo({type:'webrtc'})` (perfil CBP / L1T3, 1080p60).
+- `stores/screen-share.ts` confere `powerEfficientEncoder` a cada 5 s enquanto a tela está ao vivo e grava o resultado, só quando houve quadros codificados no intervalo.
+- As configurações salvas antes da Fase Q têm o codec descartado (versão 2), porque guardavam "h264" só por ser o padrão antigo.
+
+Tela:
+- `degradationPreference: maintain-resolution` (antes: maintain-framerate); `contentHint: motion` continua.
+
+Assinaturas sob demanda (`voice/subscriptions.ts`):
+- As duas salas conectam com `autoSubscribe: false` e `adaptiveStream: false`.
+- No livekit-client 2.23, `adaptiveStream` é da sala inteira e passa por cima de `setVideoQuality`: com ele, quem assistia pela voz recebia 720p na janela padrão.
+- Voz: microfone e câmera (camada MEDIUM) sempre; tela e áudio da tela só da transmissão escolhida em `useWatch`. Espectador: regra antiga.
+- `useWatch.applySubscriptions()` aplica nas duas salas e roda a cada mudança de trilha, participante, conexão, seleção, player visível ou áudio ligado.
+- Sem espectador, o dynacast pausa as camadas do emissor (`active=false`, upload 0).
+
+Áudio:
+- O `RoomAudioRenderer` saiu: ele tocava todo áudio assinado, inclusive o da tela. No lugar, `MicrophoneAudio` toca só os microfones e `StreamAudio` toca o áudio da transmissão assistida, com volume próprio e ensurdecer.
+- O áudio do stream liga junto com o "Assistir", e a escolha fica salva em `watch.audio`.
+
+Voz (`stores/audio-settings.ts`, `voice/audio-processing.ts`):
+- Eco e ganho do navegador sempre ligados. Supressão:
+  - off: nenhuma;
+  - standard: nativa, com `voiceIsolation`;
+  - advanced: RNNoise com a nativa desligada.
+- Gate opcional, de -80 a -10 dB.
+- O processamento local é um `TrackProcessor` do livekit-client com `AudioContext` próprio a 48 kHz: fonte → [RNNoise] → medidor → [gate] → `MediaStreamDestination` mono. RNNoise e gate têm entrada mono explícita (ver pegadinha dos -6 dB).
+- Mudar de modo reinicia a captura só quando a supressão nativa muda; gate e limite mudam ao vivo, sem trocar a trilha publicada.
+- O RNNoise vem de `@sapphi-red/web-noise-suppressor` (MIT; RNNoise BSD-3 via `@shiguredo/rnnoise-wasm`, Apache-2.0). O gate é nosso (`noise-gate.worklet.js`): ataque de 5 ms, fechamento de 50 ms, retenção de 200 ms, histerese de 6 dB e limite como AudioParam.
+- Opus da voz: `maxBitrate` 64 kbps, `red: true`, `dtx: true` (`VOICE_PUBLISH_OPTIONS`, também em `publishDefaults`). Áudio da tela: `getDisplayMedia` com eco, ruído e ganho desligados, estéreo, 128 kbps, sem DTX nem RED.
+
+CSP:
+- `script-src` ganhou `'wasm-unsafe-eval'`, que só permite compilar WebAssembly (o RNNoise roda em WASM dentro do AudioWorklet). `eval` de texto continua bloqueado.
+
+Painel de depuração:
+- Por camada: resolução, fps, bitrate, codec, codificador, `powerEfficientEncoder`, `qualityLimitationReason`, `active`, ms por quadro e modo SVC.
+- Fonte: fps medido (`media-source`), estimativa de banda (`availableOutgoingBitrate`), RTT e `degradationPreference`.
+- Microfone e áudio da tela: processamento aplicado (`getSourceTrackSettings`), processador, bitrate, codec e RED ativo (primeiro codec negociado no sender; a estatística `outbound-rtp` do Chromium mostra `audio/opus` mesmo com RED).
+- Com o processador local: nível antes e depois do gate, nível do canal 0 da saída (deve ser igual ao downmix; o aceite falha com 6 dB de diferença) e se o sender envia a trilha processada.
+- Sistema: novo IPC `diagnostics:get` com GPU, `video_encode`, features ativas e CPU por processo.
+- O JSON completo fica em `data-debug-json`, lido pelos scripts.
+
+Testes (achados T1 e T4 da auditoria):
+- O `npm run e2e` agora é isolado (`scripts/lib/stack.mjs`):
+  - LiveKit em 27880/27881/27882 com `livekit.yaml` copiado do repositório (troca só portas, chave e destino do webhook), `--node-ip 127.0.0.1`;
+  - backend em 28080, imagem `livekit-backend:e2e`;
+  - segredos de `crypto.randomBytes` validados e passados por arquivo de ambiente temporário (não pela linha de comando);
+  - tudo com a etiqueta `livekit-app.test=frontend`, removido no fim, no Ctrl+C e na execução seguinte.
+- Fonte falsa pedida a 60 fps. `npm run medir` (mesmo ambiente) gera a tabela de `medicoes.md`; `npm test` roda o teste unitário do gate (`node --test`).
+
+Executável:
+- `electron-builder` 26.15.3, alvos `portable` e `dir` (`electron-builder.yml`, `npm run package`). `appId` = `app.livekit.desktop`, igual ao `APP_USER_MODEL_ID`. Sem assinatura nem fuses (R4).
+- `--default-server-url=` sugere o endereço na primeira execução também no pacote.
+
 ## Infra local (`infra/`)
 
 - `docker-compose.yml` sobe **LiveKit + backend** (7880, 7881/TCP, 7882/UDP e 8080, todas em 127.0.0.1 exceto as do LiveKit).
@@ -68,7 +133,8 @@ Detalhes de implementação, decisões por fase e pegadinhas conhecidas. O `CLAU
 ## Testes de aceite
 
 - `backend\scripts\e2e.ps1` (R1a + R1b, 63 checks, ~3 min): sobe LiveKit (17880), backend (18080) e bots numa rede Docker descartável, com cópia temporária do `livekit.yaml`, sem tocar no `infra/.env`. O bot `backend/cmd/e2ebot` (server-sdk-go) gera webhooks reais; o cliente WebSocket é `ClientWebSocket` do .NET.
-- `frontend\scripts\e2e.mjs` (`npm run e2e`, R2, 50 checks, ~4 min): duas instâncias do app compilado, mídia falsa, dirigidas por CDP (portas 9311/9312). **Hoje usa o Compose de dev** (gera convites, reinicia o `backend`, deixa usuários `e2e_*`): contraria a regra de ambiente isolado; ver `docs/auditoria.md`.
+- `frontend\scripts\e2e.mjs` (`npm run e2e`, R2 + Fase Q, ~6 min): duas instâncias do app compilado (ou do `.exe` com `--exe`), mídia falsa, dirigidas por CDP (portas 9311/9312), num servidor descartável (LiveKit 27880-27882, backend 28080; `scripts/lib/stack.mjs`). Não toca no Compose de dev.
+- `frontend\scripts\medir.mjs` (`npm run medir`, CDP 9321/9322): mesmo ambiente, tabela de qualidade por codec e cenário.
 
 ## Pegadinhas conhecidas
 
@@ -92,6 +158,19 @@ Detalhes de implementação, decisões por fase e pegadinhas conhecidas. O `CLAU
 - Seletor Zustand nunca devolve `[]` ou objeto novo a cada leitura: laço infinito de renderização (erro React #185). Use uma constante.
 - O ambiente do VS Code/Claude Code exporta `ELECTRON_RUN_AS_NODE`: remova-o para lançar o Electron por script, senão ele roda como Node ("bad option").
 - `window.close()` pelo renderer fecha a janela sem o evento `close` do `BrowserWindow` (pula o "esconder na bandeja"); para simular o X, mande `WM_CLOSE`.
+- O app empacotado tira o nome (e a pasta de perfil `%APPDATA%\<nome>`) do `package.json` dentro do `app.asar`, e o electron-builder não copia o `productName` da configuração para lá. Sem `extraMetadata.productName`, o `.exe` usava o perfil do `npm run dev` (`livekit-frontend`) e não abria com o dev aberto, por causa da trava de instância única. Confira com `require('@electron/asar').extractFile(...)`.
 - Com `backgroundThrottling: false`, `document.visibilityState` fica sempre `visible`; para saber se a janela está escondida, use o Windows (`MainWindowHandle` = 0).
 - `--use-fake-device-for-media-stream` também troca a captura de tela pelo padrão animado do Chromium (1920x1080@60); o seletor continua listando as telas reais.
-- O backend limita cadastro + login a 10 por 15 min por IP: rodar o aceite várias vezes seguidas esbarra nisso (`docker compose restart backend` zera, o limite é em memória).
+- O backend de dev limita cadastro + login a 10 por 15 min por IP (`docker compose restart backend` zera, o limite é em memória). O aceite isolado sobe o dele com `AUTH_RATE_LIMIT=1000`.
+
+### Mídia (Fase Q)
+- No Windows, H.264 por GPU exige `--enable-features=PlatformH264CbpEncoding`, porque o LiveKit negocia Constrained Baseline. AV1 por GPU no WebRTC fica atrás de `WebRtcAV1HWEncode` (sem efeito na AMD testada). São features em teste no Chromium e os nomes podem mudar com a versão do Electron: depois de atualizar o Electron, confira no painel (`encoderImplementation`).
+- `MediaCapabilities.encodingInfo({type:'webrtc'})` com `profile-level-id` no `contentType` funciona e responde por perfil: com a feature, só o H.264 Constrained Baseline (`42e01f`) aparece como `powerEfficient` na AMD.
+- `app.commandLine.appendSwitch('enable-features', ...)` substitui o valor anterior da chave: junte com o que já existe (`media-flags.ts`).
+- `adaptiveStream` no livekit-client vale para a sala toda e passa por cima de `setVideoQuality`/`setVideoDimensions` quando o elemento é menor. Para "sempre a camada máxima", só desligando na sala.
+- `getAppMetrics().cpu.percentCPUUsage` já vem dividido pelo número de processadores lógicos: é % da máquina, não de um núcleo.
+- `?url` do Vite embute arquivos pequenos como `data:` URL, e a CSP bloqueia worklet carregado de `data:`. Use `?url&no-inline` para AudioWorklet.
+- A fonte de áudio falsa do Chromium (`--use-fake-device-for-media-stream`) é um bipe curto (20 ms a cada 500 ms) quase no volume máximo: não serve para medir nível nem gate. O aceite troca o microfone de A por um tom constante de -45 dBFS (`--use-file-for-fake-audio-capture=<wav>`, gerado por `writeToneWav`), e o algoritmo do gate tem teste próprio (`npm test`). Amostrar a cada 500 ms coincide com o período do bipe e esconde o problema.
+- O microfone chega ao Web Audio em **estéreo** (L = R), mesmo com `getSettings().channelCount` = 1. Um AudioWorkletNode sem `outputChannelCount` (o `RnnoiseWorkletNode`) herda dois canais e, processando só o canal 0, deixa o 1 em silêncio: o downmix para mono do destino derrubava a voz em 6 dB. Force `channelCount = 1` + `channelCountMode = 'explicit'` nos nós da cadeia.
+- A tela parada gera poucos quadros (o Chromium só recaptura quando a imagem muda): "1 fps" com a área de trabalho parada não é defeito. Meça com vídeo ou jogo em movimento.
+- `getTrackReferenceId` não é exportado pelo `@livekit/components-react` (só pelo components-core, que não é dependência direta).

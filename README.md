@@ -45,6 +45,40 @@ pwsh -NoProfile -File scripts\e2e.ps1     # aceite com backend e LiveKit reais
 
 Detalhes de cada parte estão no README da respectiva pasta.
 
+## Iniciar teste (duas instâncias no mesmo PC)
+
+Atalho na área de trabalho, criado uma vez com:
+
+```powershell
+pwsh -NoProfile -File infra\scripts\criar-atalho.ps1
+```
+
+O atalho "Iniciar teste" (ou `pwsh -NoProfile -File infra\scripts\iniciar-teste.ps1`):
+
+1. confere o Docker e abre o Docker Desktop se precisar;
+2. sobe o Compose de desenvolvimento (LiveKit + backend) e espera o backend responder;
+3. roda o `seed`;
+4. abre **duas instâncias** do app empacotado (`frontend\dist\win-unpacked`, gerado com `npm run package` se ainda não existir). A segunda tem perfil próprio, com sessão e dispositivos separados.
+
+Na primeira vez, cada instância pede o servidor (`http://localhost:8080`, já preenchido) e o login.
+
+| Opção | Efeito |
+|---|---|
+| `-Convites 2` | gera e mostra dois convites de uso único |
+| `-Rebuild` | recompila o backend e o app |
+
+Precisa de `infra\.env` (veja [infra/README.md](infra/README.md)) e de `npm install` feito uma vez em `frontend\`.
+
+O `.exe` portátil, que roda sem instalar, fica em `frontend\dist\LiveKitApp-<versão>-portatil.exe`. O endereço do servidor é configurável na tela. Assinatura, ícone e instalador ficam para a R4.
+
 ## Estado
 
-Fases R0 (reestruturação), R1a (backend Go: identidade, canais e tokens LiveKit), R1b (tempo real: webhooks do LiveKit, presença, WebSocket e menções) e R2 (frontend conectado ao backend Go: tipos gerados do contrato, endereço do servidor na tela, presença e "chamar atenção" pelo WebSocket, notificação do Windows e bandeja) concluídas. Próxima: R3 (servidor caseiro com Caddy e TLS).
+Concluídas:
+- **R0**: reestruturação.
+- **R1a**: backend Go (identidade, canais e tokens LiveKit).
+- **R1b**: tempo real (webhooks do LiveKit, presença, WebSocket e menções).
+- **R2**: frontend conectado ao backend Go.
+- **Fase A**: auditoria.
+- **Fase Q**: qualidade de áudio e vídeo (codificação por GPU, camada máxima para quem assiste, "Assistir" sob demanda, RNNoise e noise gate, executável de teste). Medições em [docs/medicoes.md](docs/medicoes.md).
+
+Próxima: R3 (servidor caseiro com Caddy e TLS).

@@ -1,11 +1,18 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { RoomAudioRenderer, RoomContext } from '@livekit/components-react';
+import { RoomContext } from '@livekit/components-react';
 import type { ConnectionState, LocalTrackPublication } from 'livekit-client';
 import { MediaDeviceFailure, Room, RoomEvent, Track } from 'livekit-client';
+import {
+  VOICE_PUBLISH_OPTIONS,
+  captureOptionsFor,
+  currentAudioSettings,
+  useAudioSettings,
+} from '../stores/audio-settings';
 import { useScreenShare } from '../stores/screen-share';
 import { useSession } from '../stores/session';
 import { useVoice } from '../stores/voice';
 import { useWatch } from '../stores/watch';
+import { MicrophoneAudio, StreamAudio } from './StreamAudio';
 
 // Sala da conexão de voz do usuário (microfone, câmera e publicação de tela).
 // O Modo Espectador usa uma segunda Room separada (SpectatorProvider); misturar as duas
@@ -13,17 +20,19 @@ import { useWatch } from '../stores/watch';
 function createRoom(): Room {
   const devices = useVoice.getState().devices;
   return new Room({
-    // adaptiveStream/dynacast: o SFU só envia (e o emissor só codifica) as camadas que alguém está
-    // realmente assistindo, poupando CPU e banda de upload.
-    adaptiveStream: true,
+    // adaptiveStream desligado (Fase Q): ele escolhe a camada pelo tamanho do <video> e, no livekit-client, vale
+    // para a sala inteira e passa por cima de setVideoQuality. Com ele, quem assistia pela voz recebia 720p na
+    // janela padrão. As camadas agora são pedidas explicitamente (voice/subscriptions.ts): tela na mais alta,
+    // câmera na média.
+    adaptiveStream: false,
+    // dynacast: o SFU avisa quais camadas alguém assiste e o emissor para de codificar e enviar as outras. Sem
+    // ninguém assistindo a tela, o upload dela vai a ~0 (medido em docs/medicoes.md).
     dynacast: true,
-    audioCaptureDefaults: {
-      // Processamento de voz do navegador: sem eco, sem ruído de fundo e volume nivelado.
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      ...(devices.audioinput ? { deviceId: devices.audioinput } : {}),
-    },
+    // Vale para o microfone; o áudio da tela sobrescreve (estéreo, sem DTX nem RED) em stores/screen-share.ts.
+    publishDefaults: VOICE_PUBLISH_OPTIONS,
+    // Processamento de voz do navegador conforme o modo escolhido (eco e ganho sempre; ruído nativo só no
+    // "Padrão"). O microfone é criado com estas mesmas opções em stores/voice.ts.
+    audioCaptureDefaults: captureOptionsFor(currentAudioSettings(), devices.audioinput),
     videoCaptureDefaults: devices.videoinput ? { deviceId: devices.videoinput } : {},
     audioOutput: devices.audiooutput ? { deviceId: devices.audiooutput } : {},
   });
@@ -33,7 +42,6 @@ function createRoom(): Room {
 // de canais é feita pelo store de voz (stores/voice.ts); aqui só ligamos eventos da Room aos stores.
 export function VoiceProvider({ children }: { children: ReactNode }) {
   const [room] = useState(createRoom);
-  const deafened = useVoice((state) => state.deafened);
   const authenticated = useSession((state) => state.status === 'authenticated');
 
   useEffect(() => {
@@ -67,7 +75,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
         void useScreenShare.getState().stop();
       }
     };
-    // Mudanças em quem publica tela atualizam a lista de transmissões disponíveis (badge AO VIVO).
+    // Com autoSubscribe desligado, toda trilha nova (microfone de quem entrou, tela que começou) passa pela
+    // regra de assinaturas; refreshStreams também atualiza a lista de transmissões (badge AO VIVO).
     const onRemoteTracksChanged = () => {
       useWatch.getState().refreshStreams();
     };
@@ -81,8 +90,21 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
     room.on(RoomEvent.ParticipantConnected, onRemoteTracksChanged);
     room.on(RoomEvent.ParticipantDisconnected, onRemoteTracksChanged);
     room.on(RoomEvent.Connected, onRemoteTracksChanged);
+    room.on(RoomEvent.Reconnected, onRemoteTracksChanged);
+
+    // Configurações de áudio mudam com a pessoa já na voz: aplica no microfone na hora.
+    const unsubscribeAudio = useAudioSettings.subscribe((next, previous) => {
+      if (
+        next.suppression !== previous.suppression ||
+        next.gateEnabled !== previous.gateEnabled ||
+        next.gateThresholdDb !== previous.gateThresholdDb
+      ) {
+        void useVoice.getState().applyAudioSettings(next, previous);
+      }
+    });
 
     return () => {
+      unsubscribeAudio();
       room.off(RoomEvent.ConnectionStateChanged, onConnectionState);
       room.off(RoomEvent.Disconnected, onDisconnected);
       room.off(RoomEvent.MediaDevicesError, onMediaDevicesError);
@@ -92,6 +114,7 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       room.off(RoomEvent.ParticipantConnected, onRemoteTracksChanged);
       room.off(RoomEvent.ParticipantDisconnected, onRemoteTracksChanged);
       room.off(RoomEvent.Connected, onRemoteTracksChanged);
+      room.off(RoomEvent.Reconnected, onRemoteTracksChanged);
       useVoice.getState().attachRoom(null);
       void room.disconnect();
     };
@@ -107,8 +130,8 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
 
   return (
     <RoomContext.Provider value={room}>
-      {/* "Ensurdecer" silencia toda a saída de áudio da sala, sem desconectar. */}
-      <RoomAudioRenderer room={room} muted={deafened} />
+      <MicrophoneAudio room={room} />
+      <StreamAudio room={room} />
       {children}
     </RoomContext.Provider>
   );

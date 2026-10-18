@@ -1,7 +1,9 @@
 import { join } from 'node:path';
 import { app, BrowserWindow, dialog, type Tray } from 'electron';
 import { loadMainConfig, type MainConfig } from './config';
+import { registerDiagnostics } from './diagnostics';
 import { registerIpcHandlers } from './ipc';
+import { applyMediaFeatureFlags } from './media-flags';
 import { registerScreenCapture } from './screen-capture';
 import {
   APP_ORIGIN,
@@ -97,8 +99,8 @@ function showMainWindow(config: MainConfig): void {
   mainWindow.focus();
 }
 
-// Ordem importa: o esquema `app://` e o endurecimento global precisam ser registrados antes de
-// `ready`; protocolo, CSP e sessão só depois. Os handlers de IPC entram antes da janela abrir.
+// Ordem importa: o esquema `app://`, o endurecimento global e as features do Chromium precisam ser registrados
+// antes de `ready`; protocolo, CSP e sessão só depois. Os handlers de IPC entram antes da janela abrir.
 function start(): void {
   const config = loadMainConfig();
   if (config.userDataDir) {
@@ -116,6 +118,7 @@ function start(): void {
 
   registerAppScheme();
   enforceGlobalHardening(config);
+  applyMediaFeatureFlags(config);
 
   app.on('before-quit', () => {
     quitting = true;
@@ -139,6 +142,7 @@ function start(): void {
       showWindow: () => showMainWindow(config),
     });
     registerScreenCapture(config);
+    registerDiagnostics(config);
     tray = createTray({
       open: () => showMainWindow(config),
       quit: () => app.quit(),

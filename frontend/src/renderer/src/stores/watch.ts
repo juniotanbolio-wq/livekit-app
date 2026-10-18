@@ -3,15 +3,20 @@ import { ConnectionState, type Room } from 'livekit-client';
 import { createLiveKitToken, errorMessage } from '../lib/api';
 import {
   applySpectatorSubscriptions,
+  applyVoiceSubscriptions,
   listScreenShares,
   type StreamInfo,
-} from '../voice/spectator-subscriptions';
+} from '../voice/subscriptions';
 import { useVoice } from './voice';
 
+// "Assistir" uma transmissão. Se a pessoa está na voz do mesmo canal, a tela chega pela própria conexão de voz
+// (modo 'voice'); senão, por uma segunda conexão de espectador, oculta e só com a tela (modo 'spectator').
+// Nos dois casos a assinatura é sob demanda: só existe enquanto watchedChannelId aponta para o canal.
 export type SpectatorConnection = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 export type WatchMode = 'voice' | 'spectator';
 
 const VOLUME_KEY = 'watch.volume';
+const AUDIO_KEY = 'watch.audio';
 
 function loadVolume(): number {
   try {
@@ -29,6 +34,24 @@ function loadVolume(): number {
 function saveVolume(value: number): void {
   try {
     localStorage.setItem(VOLUME_KEY, String(value));
+  } catch {
+    return;
+  }
+}
+
+// Áudio da transmissão começa ligado ao assistir (como no Discord); se a pessoa desligar, a escolha vale para as
+// próximas vezes.
+function loadAudioPreference(): boolean {
+  try {
+    return localStorage.getItem(AUDIO_KEY) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function saveAudioPreference(enabled: boolean): void {
+  try {
+    localStorage.setItem(AUDIO_KEY, enabled ? 'on' : 'off');
   } catch {
     return;
   }
@@ -66,6 +89,7 @@ interface WatchState {
   setPlayerVisible(visible: boolean): void;
   reconcile(): Promise<void>;
   refreshStreams(): void;
+  applySubscriptions(): void;
   syncConnectionState(state: ConnectionState): void;
   handleDisconnected(): void;
 }
@@ -84,25 +108,12 @@ export const useWatch = create<WatchState>()((set, get) => {
     return spectatorConnection === 'idle' ? null : room;
   };
 
-  const applySubscriptions = (): void => {
-    const { room, selectedIdentity, audioEnabled, playerVisible, watchedChannelId } = get();
-    if (!room || room.state !== ConnectionState.Connected) {
-      return;
-    }
-    applySpectatorSubscriptions(room, {
-      selectedIdentity:
-        watchedChannelId && !voiceCovers(watchedChannelId) ? selectedIdentity : null,
-      audioEnabled,
-      videoEnabled: playerVisible,
-    });
-  };
-
   return {
     room: null,
     watchedChannelId: null,
     selectedIdentity: null,
     streams: [],
-    audioEnabled: false,
+    audioEnabled: loadAudioPreference(),
     volume: loadVolume(),
     playerVisible: false,
     spectatorChannelId: null,
@@ -115,12 +126,12 @@ export const useWatch = create<WatchState>()((set, get) => {
 
     watch(channelId, identity) {
       const current = get();
+      const sameChannel = current.watchedChannelId === channelId;
       set({
         watchedChannelId: channelId,
-        selectedIdentity:
-          identity ?? (current.watchedChannelId === channelId ? current.selectedIdentity : null),
-        streams: current.watchedChannelId === channelId ? current.streams : [],
-        audioEnabled: current.watchedChannelId === channelId ? current.audioEnabled : false,
+        selectedIdentity: identity ?? (sameChannel ? current.selectedIdentity : null),
+        streams: sameChannel ? current.streams : [],
+        audioEnabled: sameChannel ? current.audioEnabled : loadAudioPreference(),
         error: null,
       });
       void get().reconcile();
@@ -131,20 +142,22 @@ export const useWatch = create<WatchState>()((set, get) => {
         watchedChannelId: null,
         selectedIdentity: null,
         streams: [],
-        audioEnabled: false,
         error: null,
       });
+      // Desassina a tela já, nas duas salas; a reconciliação depois só fecha o espectador, se houver.
+      get().applySubscriptions();
       void get().reconcile();
     },
 
     selectStream(identity) {
       set({ selectedIdentity: identity });
-      applySubscriptions();
+      get().applySubscriptions();
     },
 
     setAudioEnabled(enabled) {
       set({ audioEnabled: enabled });
-      applySubscriptions();
+      saveAudioPreference(enabled);
+      get().applySubscriptions();
     },
 
     setVolume(volume) {
@@ -155,7 +168,29 @@ export const useWatch = create<WatchState>()((set, get) => {
 
     setPlayerVisible(visible) {
       set({ playerVisible: visible });
-      applySubscriptions();
+      get().applySubscriptions();
+    },
+
+    // Faz as duas salas refletirem o estado: a de voz sempre (microfones e câmeras dependem dela também) e a do
+    // espectador só quando é ela que cobre o canal assistido.
+    applySubscriptions() {
+      const { room, selectedIdentity, audioEnabled, playerVisible, watchedChannelId } = get();
+      const byVoice = voiceCovers(watchedChannelId);
+      const voiceRoom = useVoice.getState().room;
+      if (voiceRoom && voiceRoom.state === ConnectionState.Connected) {
+        applyVoiceSubscriptions(voiceRoom, {
+          selectedIdentity: byVoice ? selectedIdentity : null,
+          audioEnabled,
+          videoEnabled: playerVisible,
+        });
+      }
+      if (room && room.state === ConnectionState.Connected) {
+        applySpectatorSubscriptions(room, {
+          selectedIdentity: watchedChannelId && !byVoice ? selectedIdentity : null,
+          audioEnabled,
+          videoEnabled: playerVisible,
+        });
+      }
     },
 
     async reconcile() {
@@ -185,6 +220,7 @@ export const useWatch = create<WatchState>()((set, get) => {
         if (sequence !== reconcileSequence) {
           return;
         }
+        // autoSubscribe desligado: as assinaturas são feitas trilha a trilha (voice/subscriptions.ts).
         await room.connect(url, token, { autoSubscribe: false });
         if (sequence !== reconcileSequence) {
           await room.disconnect();
@@ -223,7 +259,7 @@ export const useWatch = create<WatchState>()((set, get) => {
           ? selectedIdentity
           : (streams[0]?.identity ?? selectedIdentity);
       set({ streams, selectedIdentity: selected });
-      applySubscriptions();
+      get().applySubscriptions();
     },
 
     syncConnectionState(state) {

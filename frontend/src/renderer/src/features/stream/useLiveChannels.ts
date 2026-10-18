@@ -4,6 +4,8 @@ import { Track } from 'livekit-client';
 import { usePresence } from '../../stores/presence';
 import { useVoice } from '../../stores/voice';
 
+// Canais com transmissão ao vivo (badge AO VIVO). Para o canal da própria voz vale a sala LiveKit (as
+// publicações aparecem mesmo sem assinatura); para os outros, a presença do WebSocket, que não exige conexão.
 export function useLiveChannelIds(): Set<string> {
   const presence = usePresence((state) => state.byChannel);
   const voiceChannelId = useVoice((state) =>

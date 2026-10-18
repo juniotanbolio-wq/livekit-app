@@ -28,10 +28,12 @@ Plano completo, fases e critérios de aceite: `docs/plano-v2.md`.
 ## Decisões de mídia (não mudar sem discutir comigo)
 - WebRTC via LiveKit. O SFU repassa os pacotes, não recodifica.
 - 1 sala LiveKit por canal de voz (7 canais).
-- Modo Espectador: segunda conexão com identidade `<id>#spectator`, hidden, sem publicar, `autoSubscribe: false`, assinando só o vídeo de screen share do canal assistido. Nunca assinar microfone ou câmera desse canal.
-- Tela: 1080p60, ~6 a 10 Mbps, `contentHint: motion`, `degradationPreference: maintain-framerate`. Simulcast para H.264/VP8; SVC L1T3 para VP9/AV1.
-- Codificador por hardware é prioridade: medir `encoderImplementation` nas estatísticas WebRTC e preferir o codec com aceleração da GPU, com fallback.
-- Voz: Opus com DTX, cancelamento de eco e supressão de ruído. Áudio do stream: Opus estéreo ~128 kbps, opcional para o espectador.
+- Modo Espectador: segunda conexão com identidade `<id>#spectator`, hidden, sem publicar, `autoSubscribe: false`, assinando só o vídeo de screen share do canal assistido (e, se ligado, o áudio dele). Nunca assinar microfone ou câmera desse canal.
+- Assistir sob demanda (Fase Q): a sala de voz também usa `autoSubscribe: false`. Microfones e câmeras (camada média) são assinados automaticamente; a tela só ao clicar em "Assistir", sem prévia. "Parar de assistir" cancela a assinatura. Dynacast ligado.
+- Quem assiste recebe sempre a camada máxima: `adaptiveStream` desligado nas duas salas. Camada menor só quando a rede de quem assiste não comporta (decisão do SFU).
+- Tela: 1080p60, ~6 a 10 Mbps, `contentHint: motion`, `degradationPreference: maintain-resolution` (em sobrecarga cai o fps, nunca a resolução). Simulcast para H.264/VP8; SVC L1T3 para VP9/AV1.
+- Codificador por hardware é prioridade. Codec "Automático": H.264 por GPU > AV1 por GPU > H.264 em software, confirmado por `encoderImplementation`/`powerEfficientEncoder`. No Windows exige as features do Chromium em `frontend/src/main/media-flags.ts`.
+- Voz: Opus 64 kbps com RED e DTX; eco e ganho automático sempre ligados; supressão de ruído Desligada / Padrão (nativa) / Avançada (RNNoise local); noise gate opcional. Áudio do stream: Opus estéreo ~128 kbps, sem processamento de voz, opcional para quem assiste (ligado por padrão, escolha salva).
 - Loopback de áudio do sistema desligado por padrão. Captura por aplicativo é fase futura.
 - Sem FTP. UDP apenas através do WebRTC.
 
@@ -56,9 +58,9 @@ Plano completo, fases e critérios de aceite: `docs/plano-v2.md`.
 
 ## Estado atual
 Resumo; detalhes (endpoints, variáveis, decisões por fase e pegadinhas) em [docs/notas-tecnicas.md](docs/notas-tecnicas.md). **Leia as pegadinhas de lá antes de mexer em scripts PowerShell, Electron, Zustand ou WebSocket.** Atualizar os dois ao fim de cada fase.
-- R0, R1a, R1b e R2 concluídas; Fase A (auditoria, `docs/auditoria.md`) em andamento antes da R3. v1 preservada na tag `v1-node`; trabalho na branch `v2`.
+- R0, R1a, R1b, R2, Fase A (auditoria, `docs/auditoria.md`) e Fase Q (qualidade de áudio e vídeo, `docs/medicoes.md`) concluídas. v1 preservada na tag `v1-node`; trabalho na branch `v2`.
 - **Go, gcc e golangci-lint NÃO estão instalados no Windows (e não devem ser sem perguntar).** Todo comando Go roda em Docker pelos scripts de `backend/scripts/`, em PowerShell 7: `pwsh -NoProfile -File scripts\check.ps1` (generate sem deriva, build, vet, `test -race`, lint) e `scripts\e2e.ps1` (aceite isolado). Também `test.ps1`, `lint.ps1`, `generate.ps1`, `go.ps1`.
-- Frontend (projeto npm em `frontend/`): `npm run dev`, `dev:second`, `typecheck`, `lint`, `build`, `generate` / `generate:check` (tipos do contrato) e `e2e` (aceite com duas instâncias por CDP).
-- Dev local: `infra/docker-compose.yml` (LiveKit 7880/7881/7882 + backend em 127.0.0.1:8080, chave `devkey`); no app, servidor `http://localhost:8080`. Segredos em `infra/.env` (não versionado).
+- Frontend (projeto npm em `frontend/`): `npm run dev`, `dev:second`, `typecheck`, `lint`, `build`, `test` (unitários), `generate` / `generate:check` (tipos do contrato), `e2e` (aceite com duas instâncias por CDP, em servidor descartável: portas 27880-27882 e 28080), `medir` (tabela de `docs/medicoes.md`) e `package` (`.exe` portátil + `dist/win-unpacked`).
+- Dev local: `infra/docker-compose.yml` (LiveKit 7880/7881/7882 + backend em 127.0.0.1:8080, chave `devkey`); no app, servidor `http://localhost:8080`. Segredos em `infra/.env` (não versionado). "Iniciar teste" (`infra/scripts/iniciar-teste.ps1`, atalho por `criar-atalho.ps1`) sobe o Compose e abre duas instâncias do app empacotado.
 - Contrato: `contracts/openapi.yaml` (OpenAPI 3.0.3) gera Go (`backend/internal/api`) e TypeScript (`frontend/src/generated`); os dois são commitados e checados contra deriva.
-- Próxima fase: R3 (servidor caseiro: Compose de produção com Caddy e TLS, TURN, scripts do Ubuntu e `docs/servidor.md`), depois de corrigidos os achados aprovados da auditoria.
+- Próxima fase: R3 (servidor caseiro: Compose de produção com Caddy e TLS, TURN, scripts do Ubuntu e `docs/servidor.md`), depois de corrigidos os achados aprovados da auditoria. A Fase Q resolveu T1, T4, M2, M3 e M4 (H.264 por GPU medido na AMD); M1 e M5 dependem do teste real do usuário (checklist em `docs/medicoes.md`).

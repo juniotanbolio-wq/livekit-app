@@ -1,22 +1,27 @@
 {
   "name": "livekit-frontend",
   "version": "0.1.0",
+  "description": "Cliente desktop de voz, vídeo e tela para um grupo fechado (LiveKit)",
   "private": true,
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:second": "electron . --renderer-url=http://localhost:5173 --user-data-dir=.electron-second --multi-instance",
     "build": "electron-vite build",
+    "package": "electron-vite build && electron-builder --win --config electron-builder.yml",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "generate": "node scripts/generate-api.mjs",
     "generate:check": "node scripts/generate-api.mjs --check",
-    "e2e": "node scripts/e2e.mjs"
+    "test": "node --test scripts/tests/",
+    "e2e": "node scripts/e2e.mjs",
+    "medir": "node scripts/medir.mjs"
   },
   "dependencies": {
     "@livekit/components-react": "^2.9.24",
+    "@sapphi-red/web-noise-suppressor": "0.4.1",
     "livekit-client": "^2.23.0",
     "openapi-fetch": "^0.17.0",
     "react": "^19.3.1",
@@ -33,6 +38,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
     "electron": "^44.7.2",
+    "electron-builder": "26.15.3",
     "electron-vite": "^6.0.0",
     "eslint": "^10.12.0",
     "eslint-config-prettier": "^10.1.8",

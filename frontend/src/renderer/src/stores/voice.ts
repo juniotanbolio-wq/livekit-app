@@ -1,6 +1,14 @@
 import { create } from 'zustand';
-import { ConnectionState, MediaDeviceFailure, type Room } from 'livekit-client';
+import { ConnectionState, MediaDeviceFailure, Track, type Room } from 'livekit-client';
 import { createLiveKitToken, errorMessage } from '../lib/api';
+import { VoiceProcessor, syncVoiceProcessor } from '../voice/audio-processing';
+import {
+  VOICE_PUBLISH_OPTIONS,
+  captureOptionsFor,
+  currentAudioSettings,
+  needsProcessor,
+  type AudioSettings,
+} from './audio-settings';
 
 export type DeviceKind = 'audioinput' | 'videoinput' | 'audiooutput';
 
@@ -75,20 +83,34 @@ interface VoiceState {
   syncConnectionState(state: ConnectionState): void;
   handleDisconnected(): void;
   setError(message: string | null): void;
+  applyAudioSettings(next: AudioSettings, previous: AudioSettings): Promise<void>;
 }
 
 let joinSequence = 0;
+// Mudanças no processamento do microfone em fila: reiniciar a captura e trocar o processador são assíncronos, e
+// arrastar o controle do limite do gate gera várias mudanças seguidas.
+let audioQueue: Promise<void> = Promise.resolve();
 
 export const useVoice = create<VoiceState>()((set, get) => {
+  const micTrack = () =>
+    get().room?.localParticipant.getTrackPublication(Track.Source.Microphone)?.audioTrack ?? null;
+
   const applyMic = async (enabled: boolean): Promise<void> => {
     const { room, devices } = get();
     if (!room || room.state !== ConnectionState.Connected) {
       return;
     }
+    const settings = currentAudioSettings();
     try {
+      // Na primeira vez a trilha é criada com estas restrições e já com o processador (RNNoise/gate); depois,
+      // ligar e desligar só tira e põe o mudo, e as mudanças de configuração vêm por applyAudioSettings.
       await room.localParticipant.setMicrophoneEnabled(
         enabled,
-        devices.audioinput ? { deviceId: devices.audioinput } : undefined,
+        {
+          ...captureOptionsFor(settings, devices.audioinput),
+          ...(needsProcessor(settings) ? { processor: new VoiceProcessor(settings) } : {}),
+        },
+        VOICE_PUBLISH_OPTIONS,
       );
     } catch (err) {
       set({ micEnabled: false, error: mediaErrorMessage(err, 'microfone') });
@@ -144,7 +166,9 @@ export const useVoice = create<VoiceState>()((set, get) => {
         if (sequence !== joinSequence) {
           return;
         }
-        await room.connect(url, token, { autoSubscribe: true });
+        // autoSubscribe desligado: microfones e câmeras são assinados pela regra de voice/subscriptions.ts e a
+        // tela só quando a pessoa clica em "Assistir" (Fase Q).
+        await room.connect(url, token, { autoSubscribe: false });
         if (sequence !== joinSequence) {
           await room.disconnect();
           return;
@@ -260,6 +284,27 @@ export const useVoice = create<VoiceState>()((set, get) => {
 
     setError(message) {
       set({ error: message });
+    },
+
+    // Configurações de áudio mudaram com o microfone já criado: troca as restrições do navegador (só quando a
+    // supressão nativa muda, porque isso reabre o dispositivo) e ajusta o processador local.
+    applyAudioSettings(next, previous) {
+      const run = async () => {
+        const track = micTrack();
+        if (!track) {
+          return;
+        }
+        try {
+          if (next.suppression !== previous.suppression) {
+            await track.restartTrack(captureOptionsFor(next, get().devices.audioinput));
+          }
+          await syncVoiceProcessor(track, next);
+        } catch (err) {
+          set({ error: `Falha ao aplicar o processamento de áudio: ${errorMessage(err)}` });
+        }
+      };
+      audioQueue = audioQueue.then(run, run);
+      return audioQueue;
     },
   };
 });

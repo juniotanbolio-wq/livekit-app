@@ -1,0 +1,32 @@
+# Empacotamento de TESTE (Fase Q): .exe portátil (um arquivo, sem instalar) e a pasta desempacotada, que o
+# "Iniciar teste" (infra/scripts/iniciar-teste.ps1) abre direto por ser mais rápida (o portátil se extrai numa
+# pasta temporária a cada execução). Assinatura de código, fuses do Electron, ícone próprio e instalador NSIS
+# ficam para a R4.
+#
+#   npm run package     -> dist/LiveKitApp-<versão>-portatil.exe e dist/win-unpacked/
+appId: app.livekit.desktop # precisa ser igual ao APP_USER_MODEL_ID de src/main/index.ts (toasts do Windows)
+productName: LiveKit App
+# O Electron tira o nome do app (e a pasta de perfil, %APPDATA%\<nome>) do package.json empacotado. Sem o
+# productName ali, o .exe usava "livekit-frontend", o mesmo perfil do `npm run dev`: dividia sessão e
+# configurações com o app de desenvolvimento e não abria com ele aberto (trava de instância única). Só o pacote
+# ganha o campo; o dev continua no perfil de sempre.
+extraMetadata:
+  productName: LiveKit App
+directories:
+  output: dist
+# Só o que o app usa em execução: o código compilado pelo electron-vite. O electron-builder acrescenta as
+# dependências de produção do package.json (o processo principal importa zod em tempo de execução).
+files:
+  - out/**
+  - package.json
+asar: true
+# Não há módulo nativo para recompilar.
+npmRebuild: false
+win:
+  target:
+    - target: portable
+      arch: x64
+    - target: dir
+      arch: x64
+portable:
+  artifactName: LiveKitApp-${version}-portatil.exe

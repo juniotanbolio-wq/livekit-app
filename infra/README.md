@@ -15,10 +15,16 @@ docker compose down
 
 Portas: 7880 (sinalização do LiveKit), 7881/TCP (reserva), 7882/UDP (mídia) e 8080 (backend, só em 127.0.0.1). No app, o endereço do servidor é `http://localhost:8080` (pré-preenchido na primeira execução em desenvolvimento).
 
-O backend aceita as origens de navegador do Vite (`http://localhost:5173`, `http://127.0.0.1:5173`) e do app compilado (`app://desktop`); para mudar, defina `CORS_ORIGINS` no `.env`. O `frontend\scripts\e2e.mjs` usa este Compose (reinicia o contêiner `backend` e deixa usuários `e2e_*` no banco de desenvolvimento).
+O backend aceita as origens de navegador do Vite (`http://localhost:5173`, `http://127.0.0.1:5173`) e do app compilado (`app://desktop`); para mudar, defina `CORS_ORIGINS` no `.env`. Os aceites (`frontend\scripts\e2e.mjs` e `backend\scripts\e2e.ps1`) **não** usam este Compose: sobem contêineres, rede e volume próprios e descartáveis.
 
 - `docker-compose.yml`: serviços `livekit` e `backend` (build de `../backend`, banco SQLite no volume `backend-data`)
 - `livekit.yaml`: configuração do LiveKit, incluindo o **webhook** que avisa o backend (presença e quem está transmitindo)
+- `scripts/iniciar-teste.ps1`: confere o Docker (abre o Docker Desktop se precisar), sobe este Compose, espera o `/health`, roda o `seed` e abre duas instâncias do app empacotado (a segunda com perfil próprio em `%LOCALAPPDATA%\LiveKitApp-teste\B`). Opções `-Rebuild`, `-Convites N` e `-Pausar`.
+- `scripts/criar-atalho.ps1`: cria o atalho "Iniciar teste" na área de trabalho
+
+## Camadas de vídeo e rede de quem assiste
+
+O SFU repassa a camada mais alta que o espectador pede (o app pede sempre a máxima). Ele só desce de camada se a estimativa de banda **daquele espectador** não comporta. Em H.264/VP8 desce de 1080p60 para 720p30 e 360p15; em AV1/VP9 (SVC L1T3) cai o fps (60 → 30 → 15) e a resolução fica. Ao melhorar a rede, ele volta a subir sozinho. Isso é o controle de congestionamento padrão do LiveKit (`rtc.congestion_control`, ligado por padrão, sem pausar o vídeo); não há configuração nossa no `livekit.yaml`. Do lado de quem transmite, o WebRTC só desliga a camada mais alta se o upload de casa não comportar.
 
 ## Como o LiveKit fala com o backend
 

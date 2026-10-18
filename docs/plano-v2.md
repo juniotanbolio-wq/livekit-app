@@ -50,7 +50,7 @@ Já em uso: a mídia trafega por UDP na porta 7882 (porta única multiplexada). 
 Não usar. É antigo, sem criptografia por padrão e feito para transferir arquivos, não para tempo real. Se o app precisar trocar arquivos no futuro, a solução é upload por HTTPS para o backend.
 
 ### Gargalo principal: o codificador
-Na v1, o H.264 saiu pelo OpenH264 (software). Em PCs mais fracos, isso consome muita CPU e derruba os 60 fps. A Fase R5 mede `encoderImplementation` e `powerEfficientEncoder` nas estatísticas WebRTC e prioriza codificação por hardware (GPU), com fallback.
+Na v1, o H.264 saiu pelo OpenH264 (software). Em PCs mais fracos, isso consome muita CPU e derruba os 60 fps. A Fase Q mede `encoderImplementation` e `powerEfficientEncoder` nas estatísticas WebRTC e prioriza codificação por hardware (GPU), com fallback.
 
 ### Orçamento de banda (pior caso, qualidade máxima)
 - Cada transmissor (upload da casa de quem transmite): ~10 Mbps (1080p60 + camadas de simulcast).
@@ -104,6 +104,17 @@ Checklist de rede:
 - Presença e menções via WebSocket. Menção gera notificação do Windows com som. App pode ficar minimizado na bandeja.
 - Aceite: duas instâncias locais funcionando como na v1 (voz, Modo Espectador, tela 1080p60) e com menções.
 
+### Q: qualidade de áudio e vídeo (antes da R3)
+Prioridade absoluta: qualidade de áudio e vídeo. Interface simples e funcional, sem investir em visual. Detalhes e números em `docs/medicoes.md`.
+- Medição antes de mudar: painel de depuração do emissor por camada (resolução, fps e bitrate enviados, codec, `encoderImplementation`, `powerEfficientEncoder`, `qualityLimitationReason`), baseline registrado em `docs/medicoes.md` e repetido no fim (tabela antes e depois). Ponto de partida do teste real: pela sala de voz, 1280x720 a 1 fps e 21 kbps em VP8; pelo Modo Espectador, 1920x1080 a 27 fps e 7,08 Mbps em H.264 (OpenH264), sem perdas, jitter 3 ms.
+- Codificador por hardware (M4): descobrir por que o H.264 sai pelo OpenH264 e fazer o Electron usar a GPU (NVIDIA, AMD ou Intel) quando houver, pelas flags do Chromium. Escolha automática do codec com aceleração (H.264 por hardware, depois AV1 por hardware, depois H.264 em software), mostrando no painel o codificador em uso.
+- Resolução fixa: quem assiste recebe sempre a camada máxima, inclusive no próprio canal de voz (sem `adaptiveStream`). `degradationPreference: maintain-resolution` (em sobrecarga cai o fps, nunca a resolução). Camadas menores só quando a rede de quem assiste não comporta; comportamento documentado.
+- Assistir sob demanda (estilo Discord): na voz, microfone e câmeras são assinados sozinhos; nenhum vídeo de tela é assinado nem mostrado como prévia. Quem está ao vivo aparece com botão "Assistir"; "Parar de assistir" cancela a assinatura. Dynacast ligado, com medição do upload do emissor sem espectador.
+- Áudio: eco, ganho automático e supressão nativos ligados na voz; supressão Desligada / Padrão / Avançada (RNNoise local, via processador de trilha do `livekit-client`); noise gate com limite ajustável; Opus de voz a 64 kbps com RED e DTX; botão "Testar microfone". Áudio do stream continua estéreo e sem processamento.
+- Executável de teste: `.exe` portátil (electron-builder) com endereço do servidor configurável; script e atalho "Iniciar teste" (confere o Docker, sobe o Compose de dev e abre duas instâncias). Endurecimento e assinatura continuam na R4.
+- Testes de aceite do frontend em ambiente isolado (achado T1 da auditoria), com fonte falsa a 60 fps (T4).
+- Aceite: testes e smoke test do app passando (teste de rede instável não conta); `docs/medicoes.md` com antes e depois, incluindo o codificador; checklist para teste com tela real e com dois PCs; commit e push.
+
 ### R3: servidor caseiro
 - `infra/`: Compose de produção (LiveKit, backend, Caddy), `livekit.yaml` para IP público, TURN embutido, Caddyfile.
 - Scripts para Ubuntu: instalação (Docker, ufw), deploy, atualização e backup do SQLite.
@@ -118,10 +129,11 @@ Checklist de rede:
 - Aceite: um amigo em outra rede abre o app, cadastra com convite, fala e assiste em 1080p60.
 
 ### R5: otimização de mídia
-- Medir `encoderImplementation` e `powerEfficientEncoder`. Preferir codificação por hardware, com escolha automática do codec (H.264, AV1 ou VP9) e fallback.
-- Ajuste fino de bitrate por preset, camadas de simulcast e opção de 60 fps também fora da tela cheia.
-- Voz: Opus com DTX, supressão de ruído e cancelamento de eco. Testes com perda de pacotes simulada.
-- Painel de depuração com perda, jitter, RTT e codec em uso.
+- Codificador por hardware, escolha automática de codec, painel por camada e processamento de voz foram adiantados para a Fase Q.
+- Ajuste fino de bitrate por preset, camadas de simulcast (ex.: 720p60 na camada média) e opção de 60 fps também fora da tela cheia.
+- Subida até 1080p no primeiro espectador (~30 s medidos na Fase Q, pela estimativa de banda de quem transmite partindo de ~400 kbps): avaliar sondagem de banda e bitrate inicial.
+- Testes com perda de pacotes simulada, na voz e na tela.
+- Painel de depuração com perda, jitter e RTT do lado de quem envia.
 - Aceite: relatório de medições com 5 transmissões simultâneas.
 
 ## 7. Futuro (não implementar agora)

@@ -297,5 +297,20 @@ Atualização de patch disponível (versões de patch do Electron costumam traze
 
 ---
 
+## Atualização depois da Fase Q (18/10/2026)
+
+Resolvidos na Fase Q (detalhes em `docs/notas-tecnicas.md` e `docs/medicoes.md`):
+- **T1**: o `npm run e2e` roda num servidor descartável próprio.
+- **T4**: fonte falsa pedida a 60 fps; o fps por camada e a limitação entram no relatório.
+- **M2** e **M3**: o painel mostra o fps medido da fonte, `powerEfficientEncoder`, ms por quadro, limitação por camada e estimativa de banda.
+- **M4**: H.264 pela GPU com a feature `PlatformH264CbpEncoding`, medido na AMD; codec automático.
+- **K2** (parcial): comentários nos arquivos de mídia tocados.
+
+Continuam abertos:
+- **M1** e **M5**: precisam do teste com tela real (checklist em `docs/medicoes.md`).
+- **M6**: camada média a 30 fps, decisão da R5.
+- **C5**: app na bandeja ainda recebe vídeo enquanto "assiste"; sem assistir, nada de tela é assinado.
+- **S6**: o espectador continua restrito só pelo cliente.
+
 ## Mudança de decisão registrada para a Parte 3
 **Menções para qualquer usuário conectado ao WebSocket**, inclusive quem está só na bandeja (hoje: só quem está num canal de voz). Exige mudança no protocolo: o snapshot passa a trazer a lista de usuários conectados e há eventos `user_online`/`user_offline` com `seq` (ou uma mensagem com a lista inteira a cada mudança, já que o grupo é pequeno). O cliente ganha uma lista "Online" na barra lateral com o botão de chamar atenção. Contrato, backend (hub conta conexões por usuário), cliente, testes e documentação mudam juntos.

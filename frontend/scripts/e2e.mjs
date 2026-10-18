@@ -1,299 +1,53 @@
-// Aceite da fase R2: duas instâncias reais do app (compilado, origem app://desktop) dirigidas por CDP,
-// com câmera e microfone falsos do Chromium, contra o Compose de desenvolvimento (infra/docker-compose.yml).
+// Aceite do frontend (R2 + Fase Q): duas instâncias reais do app (compilado, origem app://desktop) dirigidas por
+// CDP, com câmera, microfone e tela falsos do Chromium, contra um servidor DESCARTÁVEL (scripts/lib/stack.mjs):
+// LiveKit e backend em contêineres próprios, portas 27880-27882 e 28080, segredos desta execução. O ambiente de
+// desenvolvimento (Compose de infra/, banco e infra/.env) não é tocado.
 //
-//   cd infra; docker compose up -d --build; docker compose exec backend /server seed
 //   cd frontend; npm run e2e                  (compila antes; --no-build pula a compilação)
+//   npm run e2e -- --exe <caminho do .exe>    (mesmo aceite no app empacotado; não compila)
 //   npm run e2e -- --screenshots <pasta>      (salva capturas de tela das etapas principais)
 //
-// --use-fake-device-for-media-stream também troca a captura de tela pelo padrão animado do Chromium
-// (1920x1080 a 60 fps): o seletor lista as telas reais desta máquina, mas o vídeo publicado é o falso.
-// O script reinicia o contêiner do backend (etapa de reconexão) e deixa usuários e2e_* no banco de dev.
-import { execFile, execFileSync, execSync, spawn } from 'node:child_process';
+// Pré-requisito: Docker Desktop em execução. Tudo o que o teste cria é removido no final, inclusive com Ctrl+C.
+import { execSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'node:util';
-import electronPath from 'electron';
+import { join, resolve } from 'node:path';
+import {
+  errorLines,
+  frontendDir,
+  killApp,
+  launchApp,
+  postWindowClose,
+  screenshot as captureScreenshot,
+  windowVisible,
+  writeToneWav,
+} from './lib/apps.mjs';
+import { createReporter, sleep, waitFor } from './lib/harness.mjs';
+import { cleanupOnSignal, startStack } from './lib/stack.mjs';
 
-const execFileAsync = promisify(execFile);
-const frontendDir = fileURLToPath(new URL('..', import.meta.url));
-const composeFile = fileURLToPath(new URL('../../infra/docker-compose.yml', import.meta.url));
-const SERVER_URL = 'http://localhost:8080';
 const CHANNEL_ID = 'voice-1';
 const args = process.argv.slice(2);
-const screenshotsDir = args.includes('--screenshots')
-  ? args[args.indexOf('--screenshots') + 1]
-  : null;
-
-// ---------- resultado ----------
-const results = [];
-function check(name, ok, detail = '') {
-  results.push({ name, ok });
-  const mark = ok ? '\x1b[32m  PASSOU\x1b[0m' : '\x1b[31m  FALHOU\x1b[0m';
-  console.log(`${mark}  ${name}${detail ? `  (${detail})` : ''}`);
-  return ok;
+function argValue(name) {
+  const index = args.indexOf(name);
+  return index >= 0 ? (args[index + 1] ?? null) : null;
 }
-function note(name, detail) {
-  results.push({ name, ok: true, skipped: true });
-  console.log(`\x1b[33m  NÃO TESTÁVEL\x1b[0m  ${name}  (${detail})`);
-}
-function section(title) {
-  console.log(`\n\x1b[36m=== ${title} ===\x1b[0m`);
-}
+const screenshotsDir = argValue('--screenshots');
+const exePath = argValue('--exe') ? resolve(argValue('--exe')) : null;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const reporter = createReporter();
+const { check, note, mustPass, section } = reporter;
 
-async function waitFor(fn, { timeout = 15_000, interval = 200 } = {}) {
-  const deadline = Date.now() + timeout;
-  let last;
-  while (Date.now() < deadline) {
-    try {
-      last = await fn();
-      if (last) {
-        return last;
-      }
-    } catch {
-      last = undefined;
-    }
-    await sleep(interval);
-  }
-  return last ?? false;
-}
-
-// ---------- Docker / backend ----------
-function compose(...composeArgs) {
-  return execFileSync('docker', ['compose', '-f', composeFile, ...composeArgs], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-}
-
-function createInvite() {
-  const out = compose('exec', '-T', 'backend', '/server', 'invite', 'create', '--hours', '1');
-  const match = /Código de convite:\s*(\S+)/.exec(out);
-  if (!match) {
-    throw new Error(`não achei o código no retorno do invite create: ${out}`);
-  }
-  return match[1];
-}
-
-function backendLogsSince(since) {
-  return compose('logs', '--no-color', '--since', since, 'backend');
-}
-
-async function health() {
-  try {
-    const response = await fetch(`${SERVER_URL}/health`);
-    return response.ok ? await response.json() : null;
-  } catch {
-    return null;
-  }
-}
-
-// ---------- CDP ----------
-class Cdp {
-  #socket;
-  #nextId = 1;
-  #pending = new Map();
-
-  static async connect(port) {
-    const page = await waitFor(
-      async () => {
-        const list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
-        return list.find((target) => target.type === 'page' && target.url.startsWith('app://'));
-      },
-      { timeout: 30_000, interval: 300 },
-    );
-    if (!page) {
-      throw new Error(`a janela do app não apareceu no CDP da porta ${port}`);
-    }
-    const cdp = new Cdp();
-    await cdp.#open(page.webSocketDebuggerUrl);
-    return cdp;
-  }
-
-  #open(url) {
-    return new Promise((resolve, reject) => {
-      this.#socket = new WebSocket(url);
-      this.#socket.onopen = () => resolve();
-      this.#socket.onerror = () => reject(new Error('falha ao conectar no CDP'));
-      this.#socket.onmessage = (event) => {
-        const message = JSON.parse(event.data);
-        const entry = this.#pending.get(message.id);
-        if (entry) {
-          this.#pending.delete(message.id);
-          if (message.error) {
-            entry.reject(new Error(message.error.message));
-          } else {
-            entry.resolve(message.result);
-          }
-        }
-      };
-      this.#socket.onclose = () => {
-        for (const entry of this.#pending.values()) {
-          entry.reject(new Error('CDP desconectado'));
-        }
-        this.#pending.clear();
-      };
-    });
-  }
-
-  // Com prazo: se a instância morrer no meio do teste, a etapa falha em vez de travar o script.
-  send(method, params = {}) {
-    if (this.#socket?.readyState !== WebSocket.OPEN) {
-      return Promise.reject(new Error('CDP desconectado'));
-    }
-    const id = this.#nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.#pending.delete(id);
-        reject(new Error(`CDP sem resposta para ${method}`));
-      }, 30_000);
-      this.#pending.set(id, {
-        resolve: (value) => {
-          clearTimeout(timer);
-          resolve(value);
-        },
-        reject: (error) => {
-          clearTimeout(timer);
-          reject(error);
-        },
-      });
-      this.#socket.send(JSON.stringify({ id, method, params }));
-    });
-  }
-
-  // Avalia uma expressão na página com os auxiliares de DOM abaixo disponíveis.
-  async eval(expression) {
-    const result = await this.send('Runtime.evaluate', {
-      expression: `(async () => { ${PAGE_HELPERS}; return (${expression}); })()`,
-      awaitPromise: true,
-      returnByValue: true,
-    });
-    if (result.exceptionDetails) {
-      throw new Error(result.exceptionDetails.exception?.description ?? 'erro na página');
-    }
-    return result.result.value;
-  }
-
-  close() {
-    this.#socket?.close();
-  }
-}
-
-// Executados dentro da página. fill usa o setter nativo para o React enxergar a mudança do input.
-const PAGE_HELPERS = `
-  const $ = (s) => document.querySelector(s);
-  const $$ = (s) => [...document.querySelectorAll(s)];
-  const exists = (s) => $(s) !== null;
-  const text = (s) => $(s)?.textContent?.trim() ?? null;
-  const click = (s) => { const el = $(s); if (!el) return false; el.click(); return true; };
-  const clickText = (s, t) => { const el = $$(s).find((e) => e.textContent.trim() === t); if (!el) return false; el.click(); return true; };
-  const fill = (s, v) => {
-    const el = $(s); if (!el) return false;
-    Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, v);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    return true;
-  };
-  const submit = (s) => { const el = $(s); if (!el) return false; el.requestSubmit(); return true; };
-  const key = (k, opts = {}) => window.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, ...opts }));
-  const attr = (v) => JSON.stringify(String(v));
-`;
-
-// ---------- instâncias do app ----------
-let tempRoot;
+let stack = null;
+let tempRoot = null;
 const apps = [];
 
-async function launchApp(name, port) {
-  const userData = join(tempRoot, name);
-  const env = { ...process.env };
-  delete env.ELECTRON_RENDERER_URL;
-  delete env.ELECTRON_RUN_AS_NODE;
-  const child = spawn(
-    electronPath,
-    [
-      `--remote-debugging-port=${port}`,
-      '--use-fake-device-for-media-stream',
-      '--use-fake-ui-for-media-stream',
-      '.',
-      `--user-data-dir=${userData}`,
-      '--multi-instance',
-    ],
-    { cwd: frontendDir, env, stdio: ['ignore', 'pipe', 'pipe'] },
-  );
-  const app = { name, port, child, log: [], cdp: null };
-  const collect = (chunk) => {
-    for (const line of chunk.toString('utf8').split(/\r?\n/)) {
-      if (line.trim()) {
-        app.log.push(line);
-      }
-    }
-  };
-  child.stdout.on('data', collect);
-  child.stderr.on('data', collect);
-  apps.push(app);
-  app.cdp = await Cdp.connect(port);
-  return app;
-}
-
-// Simula o clique no X: manda WM_CLOSE para a janela do processo principal. (window.close() pelo renderer
-// fecha a janela direto, sem o evento `close` que o app usa para esconder na bandeja.)
-function postWindowClose(app) {
-  const script = [
-    `$h = (Get-Process -Id ${app.child.pid}).MainWindowHandle`,
-    'if ($h -eq 0) { exit 2 }',
-    `Add-Type -Name Win -Namespace E2e -MemberDefinition '[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint m, IntPtr w, IntPtr l);'`,
-    'if (-not [E2e.Win]::PostMessage($h, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)) { exit 3 }',
-  ].join('; ');
-  execFileSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', script], {
-    stdio: 'ignore',
-  });
-}
-
-// Visível para o Windows? (document.visibilityState não serve: com backgroundThrottling desligado o
-// Chromium sempre informa "visible".) MainWindowHandle só aponta para janelas visíveis.
-function windowVisible(app) {
-  const out = execFileSync(
-    'pwsh',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `(Get-Process -Id ${app.child.pid}).MainWindowHandle`,
-    ],
-    { encoding: 'utf8' },
-  );
-  return out.trim() !== '0';
+async function screenshot(app, label) {
+  await captureScreenshot(app, screenshotsDir, label);
 }
 
 function notificationCount(app) {
   return app.log.filter((line) => line.includes('notificação de menção exibida')).length;
-}
-
-function killApp(app) {
-  app.cdp?.close();
-  if (app.child.exitCode === null) {
-    try {
-      execFileSync('taskkill', ['/PID', String(app.child.pid), '/T', '/F'], { stdio: 'ignore' });
-    } catch {
-      app.child.kill('SIGKILL');
-    }
-  }
-}
-
-async function screenshot(app, label) {
-  if (!screenshotsDir) {
-    return;
-  }
-  try {
-    const { data } = await app.cdp.send('Page.captureScreenshot', { format: 'png' });
-    await mkdir(screenshotsDir, { recursive: true });
-    await writeFile(join(screenshotsDir, `${label}-${app.name}.png`), Buffer.from(data, 'base64'));
-  } catch (err) {
-    console.log(`  (captura ${label} de ${app.name} falhou: ${err.message})`);
-  }
 }
 
 // ---------- etapas ----------
@@ -304,7 +58,11 @@ async function setupServer(app, { tryInvalid }) {
     await waitFor(() => cdp.eval(`exists('[data-screen="server-setup"]')`)),
   );
   const prefilled = await cdp.eval(`$('#serverUrl')?.value`);
-  check(`${app.name}: endereço padrão de dev pré-preenchido`, prefilled === SERVER_URL, prefilled);
+  check(
+    `${app.name}: endereço sugerido por --default-server-url`,
+    prefilled === stack.serverUrl,
+    prefilled,
+  );
   if (tryInvalid) {
     await cdp.eval(`fill('#serverUrl', 'http://localhost:9') && submit('[data-server-form]')`);
     const error = await waitFor(() => cdp.eval(`text('[data-server-error]')`), { timeout: 10_000 });
@@ -324,14 +82,14 @@ async function setupServer(app, { tryInvalid }) {
     );
   }
   await cdp.eval(
-    `fill('#serverUrl', ${JSON.stringify(SERVER_URL)}) && submit('[data-server-form]')`,
+    `fill('#serverUrl', ${JSON.stringify(stack.serverUrl)}) && submit('[data-server-form]')`,
   );
   const shown = await waitFor(() =>
     cdp.eval(`exists('[data-screen="auth"]') && text('[data-current-server]')`),
   );
   mustPass(
     `${app.name}: servidor validado (GET /health) e salvo`,
-    shown === SERVER_URL,
+    shown === stack.serverUrl,
     String(shown),
   );
 }
@@ -354,8 +112,7 @@ async function login(app, username, password) {
   return authOutcome(app);
 }
 
-// Entrou (WebSocket conectado) ou a tela mostrou um erro. O backend de dev limita cadastro + login a 10 por
-// 15 min por IP: rodar o teste muitas vezes seguidas esbarra nisso (o erro aparece aqui).
+// Entrou (WebSocket conectado) ou a tela mostrou um erro.
 async function authOutcome(app) {
   const outcome = await waitFor(
     () =>
@@ -365,13 +122,6 @@ async function authOutcome(app) {
     { timeout: 20_000 },
   );
   return outcome || { ok: false, error: 'sem resposta em 20 s' };
-}
-
-// Etapa da qual as seguintes dependem: se falhar, o teste para em vez de acumular falhas em cascata.
-function mustPass(name, ok, detail) {
-  if (!check(name, ok, detail)) {
-    throw new Error(`etapa obrigatória falhou: ${name}`);
-  }
 }
 
 // 'live' = participante da minha sala LiveKit; 'presence' = presença vinda do WebSocket.
@@ -409,53 +159,153 @@ async function mention(app, targetName, message) {
   return outcome || { outcome: 'timeout' };
 }
 
-async function debugRows(app, section) {
+async function debugRows(app, sectionName) {
   return app.cdp
-    .eval(`$$('[data-debug-section="${section}"] [data-debug-remote] tr[data-source]').map((row) => ({
+    .eval(`$$('[data-debug-section="${sectionName}"] [data-debug-remote] tr[data-source]').map((row) => ({
     source: row.dataset.source,
     subscribed: row.dataset.subscribed === 'true',
   }))`);
 }
 
+// Snapshot do painel de depuração (data-debug-json); o painel precisa estar aberto.
+async function debugJson(app) {
+  return app.cdp.eval(`debug()`);
+}
+
+function describeLayers(screen) {
+  return (screen?.outbound?.layers ?? [])
+    .map(
+      (layer) =>
+        `${layer.rid} ${layer.width}x${layer.height}@${layer.fps} ${layer.bitrateKbps}k ativa=${layer.active}`,
+    )
+    .join(' ; ');
+}
+
+// Dynacast: sem ninguém assistindo, o SFU manda o emissor pausar todas as camadas (active=false).
+async function waitLayersPaused(app, timeout = 25_000) {
+  let last = null;
+  const paused = await waitFor(
+    async () => {
+      last = (await debugJson(app))?.voice?.screen ?? null;
+      const layers = last?.outbound?.layers ?? [];
+      return layers.length > 0 && layers.every((layer) => layer.active === false);
+    },
+    { timeout, interval: 500 },
+  );
+  return { paused: Boolean(paused), detail: describeLayers(last) || 'sem estatísticas' };
+}
+
+// Maior largura recebida da tela de A na seção do painel de B ("voice" ou "spectator").
+async function waitScreenWidth(app, sectionKey, minWidth, timeout = 45_000) {
+  let best = null;
+  const reached = await waitFor(
+    async () => {
+      const row = (await debugJson(app))?.[sectionKey]?.remote.find(
+        (item) => item.source === 'screen_share' && item.inbound,
+      );
+      const width = row?.inbound?.width ?? 0;
+      if (row && (!best || width >= best.width)) {
+        best = { width, label: `${width}x${row.inbound.height} @ ${row.inbound.fps} fps` };
+      }
+      return width >= minWidth;
+    },
+    { timeout, interval: 500 },
+  );
+  return { reached: Boolean(reached), best };
+}
+
+async function micSnapshot(app) {
+  return (await debugJson(app))?.voice?.mic ?? null;
+}
+
+// Níveis do processador local e bitrate do microfone em `seconds` leituras do painel.
+// maxGap = maior diferença entre entrada e saída do gate (perto de 0 quando nada corta o sinal);
+// maxChannelGap = maior diferença entre o canal 0 e o downmix da saída (0 numa saída mono; 6 dB com canal vazio).
+async function micLevels(app, seconds = 4) {
+  const rows = [];
+  for (let i = 0; i < seconds; i++) {
+    await sleep(1_000);
+    rows.push(await micSnapshot(app));
+  }
+  const numbers = (pick) => rows.map(pick).filter((value) => typeof value === 'number');
+  const outputs = numbers((row) => row?.outputDb);
+  const gapOf = (a, b) => (typeof a === 'number' && typeof b === 'number' ? Math.abs(a - b) : null);
+  const round = (values) => (values.length > 0 ? Math.round(Math.max(...values) * 10) / 10 : null);
+  const gaps = numbers((row) => gapOf(row?.inputDb, row?.outputDb));
+  // Só leituras com sinal: no silêncio os dois medidores ficam no piso de -100.
+  const channelGaps = numbers((row) =>
+    (row?.outputDb ?? -100) > -90 ? gapOf(row?.outputDb, row?.firstChannelDb) : null,
+  );
+  const rates = numbers((row) => row?.outbound?.bitrateKbps);
+  return {
+    sendingProcessed: rows.every((row) => row?.sendingProcessed === true),
+    maxOutput: outputs.length > 0 ? Math.max(...outputs) : null,
+    maxGap: round(gaps),
+    maxChannelGap: round(channelGaps),
+    kbps:
+      rates.length > 0
+        ? Math.round((rates.reduce((s, v) => s + v, 0) / rates.length) * 10) / 10
+        : null,
+  };
+}
+
+// Média do bitrate do microfone publicado em `seconds` leituras do painel.
+async function micBitrate(app, seconds = 5) {
+  const values = [];
+  for (let i = 0; i < seconds; i++) {
+    await sleep(1_000);
+    const rate = (await micSnapshot(app))?.outbound?.bitrateKbps;
+    if (typeof rate === 'number') {
+      values.push(rate);
+    }
+  }
+  return values.length === 0 ? null : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
 async function main() {
   section('Preparação');
-  if (!args.includes('--no-build')) {
-    console.log('Compilando o app (npm run build)...');
-    execSync('npm run build', { cwd: frontendDir, stdio: 'ignore' });
+  if (exePath) {
+    mustPass('executável empacotado encontrado', existsSync(exePath), exePath);
+  } else {
+    if (!args.includes('--no-build')) {
+      console.log('Compilando o app (npm run build)...');
+      execSync('npm run build', { cwd: frontendDir, stdio: 'ignore' });
+    }
+    if (!existsSync(join(frontendDir, 'out', 'main', 'index.js'))) {
+      throw new Error('out/ não encontrado: rode npm run build');
+    }
   }
-  if (!existsSync(join(frontendDir, 'out', 'main', 'index.js'))) {
-    throw new Error('out/ não encontrado: rode npm run build');
-  }
-  const healthBody = await health();
-  if (
-    !check(
-      'backend do Compose respondendo em /health',
-      healthBody?.status === 'ok',
-      JSON.stringify(healthBody),
-    )
-  ) {
-    throw new Error('suba o Compose de dev (infra) antes do teste');
-  }
-  check(
-    'GET /health devolve livekitUrl',
-    typeof healthBody.livekitUrl === 'string',
-    healthBody.livekitUrl,
-  );
+  stack = await startStack();
+  check('servidor de teste isolado no ar (LiveKit + backend descartáveis)', true, stack.serverUrl);
 
   const suffix = Date.now().toString(36);
   const users = {
     A: { name: `e2e_a_${suffix}`, password: `senha-a-${suffix}` },
     B: { name: `e2e_b_${suffix}`, password: `senha-b-${suffix}` },
   };
-  const invites = [createInvite(), createInvite()];
+  const invites = [stack.createInvite(), stack.createInvite()];
   check(
     'convites gerados pelo backend Go (server invite create)',
     invites.every((code) => code.length >= 8),
   );
 
   tempRoot = await mkdtemp(join(tmpdir(), 'livekit-e2e-'));
-  const A = await launchApp('A', 9311);
-  const B = await launchApp('B', 9312);
+  const launch = async (name, port, extraArgs = []) => {
+    const app = await launchApp({
+      name,
+      port,
+      userDataDir: join(tempRoot, name),
+      serverUrl: stack.serverUrl,
+      exePath,
+      extraArgs,
+    });
+    apps.push(app);
+    return app;
+  };
+  // O microfone de A é um tom constante de -45 dBFS: permite conferir nível e noise gate de forma determinística.
+  const tone = await writeToneWav(join(tempRoot, 'tom-45db.wav'), -45);
+  const A = await launch('A', 9311, [`--use-file-for-fake-audio-capture=${tone}`]);
+  const B = await launch('B', 9312);
 
   section('1. Endereço do servidor');
   await setupServer(A, { tryInvalid: true });
@@ -498,6 +348,7 @@ async function main() {
       { timeout: 15_000 },
     ),
   );
+  await screenshot(B, '04-presenca');
 
   section('5. Transmissão aparece AO VIVO');
   await A.cdp.eval(`click('button[title="Compartilhar a tela"]')`);
@@ -506,6 +357,22 @@ async function main() {
     { timeout: 15_000 },
   );
   check('A: seletor listou uma tela', Boolean(source), String(source));
+  check(
+    'A: codec padrão é o automático',
+    (await A.cdp.eval(`$('[data-screen-codec]')?.value`)) === 'auto',
+  );
+  const preview = await waitFor(
+    () =>
+      A.cdp.eval(
+        `text('[data-codec-preview]')?.startsWith('Será usado') ? text('[data-codec-preview]') : null`,
+      ),
+    { timeout: 10_000 },
+  );
+  check('A: seletor mostra o que o automático vai usar', Boolean(preview), String(preview));
+  // Com áudio do sistema, para conferir que o áudio do stream sai sem processamento de voz.
+  await A.cdp.eval(
+    `(() => { const box = $('[data-include-audio]'); if (box && !box.checked) box.click(); return true; })()`,
+  );
   await A.cdp.eval(
     `click('[data-source-id^="screen:"]') && clickText('[role="dialog"] button', 'Compartilhar')`,
   );
@@ -527,9 +394,44 @@ async function main() {
   );
   await screenshot(B, '05-ao-vivo');
 
+  section('5b. Emissor sem espectador e configuração da tela');
+  await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
+  const idle = await waitLayersPaused(A);
+  check('ninguém assistindo: dynacast pausou todas as camadas de A', idle.paused, idle.detail);
+  const shared = (await debugJson(A))?.voice?.screen ?? null;
+  check(
+    'A: degradationPreference = maintain-resolution',
+    shared?.outbound?.degradationPreference === 'maintain-resolution',
+    String(shared?.outbound?.degradationPreference),
+  );
+  check(
+    'A: codec escolhido pelo automático',
+    Boolean(shared?.activeCodec) && /automático|hardware|software/.test(shared?.decision ?? ''),
+    `${shared?.activeCodec}: ${shared?.decision}`,
+  );
+  const screenAudio = (await debugJson(A))?.voice?.screenAudio ?? null;
+  if (!screenAudio) {
+    note('áudio da tela sem processamento', 'a captura não trouxe áudio do sistema neste ambiente');
+  } else {
+    const processing = screenAudio.processing;
+    check(
+      'áudio da tela sem eco, ruído nem ganho (música/jogo)',
+      processing.echoCancellation === false &&
+        processing.noiseSuppression === false &&
+        processing.autoGainControl === false &&
+        screenAudio.processor === null,
+      JSON.stringify({ ...processing, processor: screenAudio.processor }),
+    );
+  }
+  await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
+
   section('6. Modo Espectador assina só a tela');
   await B.cdp.eval(`click('[data-channel-id="${CHANNEL_ID}"]')`);
-  await waitFor(() => B.cdp.eval(`clickText('button', 'Assistir transmissão')`));
+  check(
+    'B (fora da voz) vê a transmissão com botão Assistir',
+    await waitFor(() => B.cdp.eval(`exists('[data-live-list] [data-watch-identity]')`)),
+  );
+  await B.cdp.eval(`click('[data-live-list] [data-watch-identity]')`);
   check(
     'B em modo espectador',
     await waitFor(() => B.cdp.eval(`exists('[data-watch-mode="spectator"]')`)),
@@ -546,30 +448,40 @@ async function main() {
   const spectatorRows = await debugRows(B, 'Espectador');
   const subscribed = spectatorRows.filter((row) => row.subscribed).map((row) => row.source);
   check(
-    'Espectador assinou só screen_share',
-    subscribed.length === 1 && subscribed[0] === 'screen_share',
+    'Espectador assinou só a tela (vídeo e, se houver, o áudio dela)',
+    subscribed.includes('screen_share') &&
+      subscribed.every((item) => item === 'screen_share' || item === 'screen_share_audio'),
     `assinadas: ${subscribed.join(', ') || 'nenhuma'}`,
   );
+  if (spectatorRows.some((row) => row.source === 'screen_share_audio')) {
+    check(
+      'áudio da transmissão já vem ligado ao assistir',
+      await waitFor(async () =>
+        (await debugRows(B, 'Espectador')).some(
+          (row) => row.source === 'screen_share_audio' && row.subscribed,
+        ),
+      ),
+    );
+  }
   check(
     'Espectador não assinou o microfone de A',
     spectatorRows.some((row) => row.source === 'microphone' && !row.subscribed),
     JSON.stringify(spectatorRows),
   );
   // O simulcast começa na camada baixa e sobe conforme a estimativa de banda; o espectador pede a HIGH.
-  // O fps depende do que muda na tela (desktop parado gera poucos quadros), então só é registrado.
   await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
   let best = null;
   const full = await waitFor(
     async () => {
-      const seen = await B.cdp.eval(`(() => {
-        const t = text('[data-debug-section="Espectador"] [data-debug-inbound="screen_share"]');
-        const m = t && /(\\d+)x(\\d+) @ (\\S+) fps/.exec(t);
-        return m ? { width: Number(m[1]), label: m[0] } : null;
-      })()`);
-      if (seen && (!best || seen.width >= best.width)) {
-        best = seen;
+      const snapshot = await debugJson(B);
+      const row = snapshot?.spectator?.remote.find(
+        (item) => item.source === 'screen_share' && item.inbound,
+      );
+      const width = row?.inbound?.width ?? 0;
+      if (row && (!best || width >= best.width)) {
+        best = { width, label: `${width}x${row.inbound.height} @ ${row.inbound.fps} fps` };
       }
-      return seen?.width >= 1920;
+      return width >= 1920;
     },
     { timeout: 45_000, interval: 500 },
   );
@@ -579,15 +491,35 @@ async function main() {
     best?.label ?? 'sem estatísticas',
   );
   check('B recebe a tela em 1080p (camada f)', Boolean(full), best?.label ?? 'sem estatísticas');
-  const sent = await waitFor(() =>
-    A.cdp.eval(`(() => {
-      const capture = text('[data-debug-section="Voz"] [data-debug-capture]');
-      const layers = $$('[data-debug-section="Voz"] [data-debug-outbound] tr[data-rid]').map((row) => [...row.cells].map((cell) => cell.textContent.trim()).join(' '));
-      const limits = $$('[data-debug-section="Voz"] p').find((p) => p.textContent.includes('limitação'))?.textContent.trim();
-      return capture && layers.length > 0 ? capture + ' | camadas: ' + layers.join(' ; ') + ' | ' + limits : null;
-    })()`),
+  const sent = await waitFor(async () => {
+    const screen = (await debugJson(A))?.voice?.screen;
+    const layers = screen?.outbound?.layers ?? [];
+    return layers.length > 0 && layers.some((layer) => layer.bitrateKbps !== null) ? screen : null;
+  });
+  check(
+    'A: captura e camadas publicadas',
+    Boolean(sent),
+    sent
+      ? `fonte ${sent.outbound.sourceFps} fps | ${sent.outbound.layers
+          .map(
+            (layer) =>
+              `${layer.rid} ${layer.width}x${layer.height}@${layer.fps} ${layer.bitrateKbps}k ${layer.encoder} (${layer.powerEfficient ? 'hw' : 'sw'}, ${layer.limitation})`,
+          )
+          .join(' ; ')}`
+      : 'sem estatísticas',
   );
-  check('A: captura e camadas de simulcast publicadas', Boolean(sent), sent || 'sem estatísticas');
+  // Se o automático previu GPU, a estatística real tem de confirmar (a escolha seguinte usa a medição).
+  const live = (await debugJson(A))?.voice?.screen ?? null;
+  const top = live?.outbound?.layers.find((layer) => layer.active !== false && layer.encoder);
+  if (live?.decision?.includes('por hardware')) {
+    check(
+      'A: codificador por hardware em uso, como o automático previu',
+      top?.powerEfficient === true,
+      `${live.activeCodec}: ${top?.encoder} (${live.decision})`,
+    );
+  } else {
+    note('codificador por hardware', `automático escolheu software: ${live?.decision}`);
+  }
   await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
   await screenshot(B, '06-espectador');
 
@@ -620,7 +552,223 @@ async function main() {
       { timeout: 15_000 },
     ),
   );
+  check(
+    'B segue assistindo, agora pela conexão de voz',
+    await waitFor(() => B.cdp.eval(`exists('[data-watch-mode="voice"]')`)),
+  );
+  const viaVoice = await waitScreenWidth(B, 'voice', 1920);
+  check(
+    'pela voz B recebe a camada máxima (1920 px, sem adaptiveStream)',
+    viaVoice.reached,
+    viaVoice.best?.label ?? 'sem estatísticas',
+  );
+
+  section('7b. Na voz, a tela só é assinada ao clicar em Assistir');
+  await B.cdp.eval(`clickText('button', 'Parar de assistir')`);
+  check(
+    'B na grade vê o cartão AO VIVO com botão Assistir, sem vídeo da tela',
+    await waitFor(() =>
+      B.cdp.eval(
+        `exists('[data-tile="screen"] [data-watch-identity]') && !exists('[data-tile="screen"] video')`,
+      ),
+    ),
+  );
+  const unsubscribed = await waitFor(async () => {
+    const rows = await debugRows(B, 'Voz');
+    return rows.some((row) => row.source === 'screen_share') &&
+      rows.every((row) => !row.source.startsWith('screen_share') || !row.subscribed)
+      ? rows
+      : null;
+  });
+  check(
+    '"Parar de assistir" cancelou a assinatura da tela (e do áudio dela)',
+    Boolean(unsubscribed),
+    JSON.stringify(unsubscribed || (await debugRows(B, 'Voz'))),
+  );
+  check(
+    'microfone de A continua assinado na voz',
+    (await debugRows(B, 'Voz')).some((row) => row.source === 'microphone' && row.subscribed),
+  );
+  await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
+  const pausedAgain = await waitLayersPaused(A);
+  check(
+    'B na voz sem assistir: dynacast pausou as camadas de A',
+    pausedAgain.paused,
+    pausedAgain.detail,
+  );
+  await B.cdp.eval(`click('[data-tile="screen"] [data-watch-identity]')`);
+  check(
+    'Assistir pela grade abre a tela grande na conexão de voz',
+    await waitFor(() => B.cdp.eval(`exists('[data-watch-mode="voice"]')`)),
+  );
+  const again = await waitScreenWidth(B, 'voice', 1920);
+  check('Assistir de novo recebe 1920 px', again.reached, again.best?.label ?? 'sem estatísticas');
   await B.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
+
+  section('7c. Áudio da voz');
+  const mic = await waitFor(async () => {
+    const snapshot = await micSnapshot(A);
+    return snapshot?.outbound?.maxBitrateKbps ? snapshot : null;
+  });
+  check(
+    'microfone: eco, ruído e ganho nativos ligados (modo Padrão)',
+    mic?.processing.echoCancellation === true &&
+      mic?.processing.noiseSuppression === true &&
+      mic?.processing.autoGainControl === true &&
+      mic?.processor === null,
+    JSON.stringify(mic?.processing),
+  );
+  check(
+    'microfone: Opus com teto de 64 kbps',
+    mic?.outbound?.maxBitrateKbps === 64,
+    `${mic?.outbound?.maxBitrateKbps} kbps · ${mic?.outbound?.codec}`,
+  );
+  check(
+    'microfone: RED ativo (redundância contra perda, primeiro codec negociado)',
+    mic?.outbound?.redActive === true,
+    `negociados ${mic?.outbound?.negotiated?.join(', ')}`,
+  );
+  await A.cdp.eval(`click('button[title="Configurações"]')`);
+  await waitFor(() => A.cdp.eval(`click('[data-settings-tab="audio"]')`));
+  await waitFor(() => A.cdp.eval(`exists('[data-audio-settings]')`));
+
+  await A.cdp.eval(`click('[data-suppression="off"]')`);
+  const off = await waitFor(
+    async () => {
+      const snapshot = await micSnapshot(A);
+      return snapshot?.processor === null && snapshot.processing.noiseSuppression === false
+        ? snapshot
+        : null;
+    },
+    { timeout: 15_000 },
+  );
+  check(
+    'modo Desligada: captura reiniciada sem supressão nativa (eco e ganho seguem ligados)',
+    Boolean(off) &&
+      off.processing.echoCancellation === true &&
+      off.processing.autoGainControl === true,
+    JSON.stringify((await micSnapshot(A))?.processing),
+  );
+
+  await A.cdp.eval(`click('[data-mic-test]')`);
+  // A fonte falsa alterna bipes curtos e silêncio digital (-100 dBFS): espera até o medidor pegar um bipe.
+  let loudest = null;
+  const heard = await waitFor(
+    async () => {
+      const value = await A.cdp.eval(
+        `(() => { const v = $('[data-mic-level]')?.dataset.micLevel; return v ? Number(v) : null; })()`,
+      );
+      if (typeof value === 'number' && (loudest === null || value > loudest)) {
+        loudest = value;
+      }
+      return typeof value === 'number' && value > -90;
+    },
+    { timeout: 15_000, interval: 50 },
+  );
+  check(
+    '"Testar microfone" toca a voz processada e mede o nível',
+    Boolean(heard),
+    `nível ${loudest?.toFixed(1)} dBFS`,
+  );
+  await A.cdp.eval(`click('[data-mic-test]')`);
+
+  await A.cdp.eval(`click('[data-suppression="advanced"]')`);
+  const advanced = await waitFor(
+    async () => {
+      const snapshot = await micSnapshot(A);
+      return snapshot?.processor === 'rnnoise' && snapshot.processing.noiseSuppression === false
+        ? snapshot
+        : null;
+    },
+    { timeout: 15_000 },
+  );
+  const voiceError = await A.cdp.eval(`text('[data-voice-error]')`);
+  check(
+    'modo Avançado: RNNoise carregado (WASM + worklet) e supressão nativa desligada',
+    Boolean(advanced) && !voiceError,
+    voiceError || JSON.stringify((await micSnapshot(A))?.processing),
+  );
+
+  // Canais: o RNNoise processa um canal só; se a saída dele tiver um segundo canal vazio, o downmix para mono do
+  // envio derruba a voz em 6 dB (defeito já visto). Numa saída mono, canal 0 e downmix têm o mesmo nível.
+  const rnnoiseLevels = await micLevels(A, 3);
+  check(
+    'RNNoise: o WebRTC envia a trilha processada, mono, sem perder nível',
+    rnnoiseLevels.sendingProcessed &&
+      rnnoiseLevels.maxChannelGap !== null &&
+      rnnoiseLevels.maxChannelGap < 1,
+    JSON.stringify(rnnoiseLevels),
+  );
+
+  // Gate testado sem RNNoise: o tom constante é ruído estacionário para o RNNoise, que passa a suprimi-lo em
+  // alguns segundos (correto, mas o nível deixaria de ser previsível). No modo Desligada o tom chega estável.
+  // Limite -10 dB: bem acima do tom, o gate tem de ficar fechado; limite -80 dB: aberto, sem perda de nível.
+  await A.cdp.eval(`click('[data-suppression="off"]')`);
+  await waitFor(async () => (await micSnapshot(A))?.processor === null, { timeout: 15_000 });
+  await A.cdp.eval(
+    `(() => { const box = $('[data-gate-enabled]'); if (!box.checked) box.click(); return true; })()`,
+  );
+  await A.cdp.eval(`fill('[data-gate-threshold]', '-10')`);
+  const gated = await waitFor(async () => (await micSnapshot(A))?.processor === 'gate -10 dB', {
+    timeout: 15_000,
+  });
+  check(
+    'gate ligado no microfone publicado (-10 dB)',
+    Boolean(gated),
+    (await micSnapshot(A))?.processor,
+  );
+  // Retenção (200 ms) + rampa de saída antes de medir.
+  await sleep(1_500);
+  const gateClosed = await micLevels(A);
+  check(
+    'gate fechado: saída em silêncio e o microfone quase sem banda (DTX)',
+    gateClosed.maxOutput !== null &&
+      gateClosed.maxOutput <= -95 &&
+      gateClosed.kbps !== null &&
+      gateClosed.kbps < 6,
+    JSON.stringify(gateClosed),
+  );
+  await A.cdp.eval(`fill('[data-gate-threshold]', '-80')`);
+  await waitFor(async () => (await micSnapshot(A))?.processor === 'gate -80 dB', {
+    timeout: 10_000,
+  });
+  await sleep(500);
+  const gateOpen = await micLevels(A);
+  check(
+    'gate aberto (limite ajustado ao vivo): a voz passa inteira',
+    gateOpen.maxGap !== null &&
+      gateOpen.maxGap < 1 &&
+      (gateOpen.maxChannelGap ?? 99) < 1 &&
+      (gateOpen.maxOutput ?? -100) > -70,
+    JSON.stringify(gateOpen),
+  );
+
+  await A.cdp.eval(`click('[data-suppression="standard"]')`);
+  await A.cdp.eval(
+    `(() => { const box = $('[data-gate-enabled]'); if (box.checked) box.click(); return true; })()`,
+  );
+  const restored = await waitFor(
+    async () => {
+      const snapshot = await micSnapshot(A);
+      return snapshot?.processor === null && snapshot.processing.noiseSuppression === true;
+    },
+    { timeout: 15_000 },
+  );
+  check('volta ao Padrão: sem processador e com a supressão nativa', Boolean(restored));
+  await A.cdp.eval(`key('Escape')`);
+
+  // DTX: com o microfone mudo o WebRTC codifica silêncio digital; com DTX o Opus quase não manda pacotes.
+  const speakingRate = await micBitrate(A);
+  await A.cdp.eval(`click('button[title="Mutar microfone"]')`);
+  await sleep(2_000);
+  const mutedRate = await micBitrate(A);
+  await A.cdp.eval(`click('button[title="Ativar microfone"]')`);
+  check(
+    'DTX: microfone mudo quase não gasta banda',
+    mutedRate !== null && mutedRate < 1,
+    `falando ${speakingRate?.toFixed(1)} kbps -> mudo ${mutedRate?.toFixed(2)} kbps`,
+  );
+  await A.cdp.eval(`key('D', { ctrlKey: true, shiftKey: true })`);
 
   section('8. Chamar atenção nos dois sentidos');
   const beforeA = notificationCount(A);
@@ -703,7 +851,7 @@ async function main() {
     }
   })();
   const restartedAt = new Date().toISOString();
-  await execFileAsync('docker', ['compose', '-f', composeFile, 'restart', 'backend']);
+  await stack.restartBackend();
   const back = await waitFor(
     async () =>
       (await A.cdp.eval(`exists('[data-realtime-status="connected"]')`)) &&
@@ -719,7 +867,8 @@ async function main() {
     Boolean(back),
     `A: ${[...seen.A]} · B: ${[...seen.B]}`,
   );
-  const reconnects = backendLogsSince(restartedAt)
+  const reconnects = stack
+    .backendLogsSince(restartedAt)
     .split('\n')
     .filter((line) => line.includes('websocket conectado')).length;
   check('dois WebSockets reconectados no backend novo', reconnects >= 2, `${reconnects} conexões`);
@@ -796,19 +945,33 @@ async function main() {
   );
   const closed = await waitFor(
     () =>
-      backendLogsSince(logoutAt)
+      stack
+        .backendLogsSince(logoutAt)
         .split('\n')
         .some((line) => line.includes('websocket desconectado') && line.includes(session.user.id)),
     { timeout: 10_000, interval: 500 },
   );
   check('backend registrou o WebSocket de A fechado', Boolean(closed));
   await sleep(3000);
-  const reopened = backendLogsSince(logoutAt)
+  const reopened = stack
+    .backendLogsSince(logoutAt)
     .split('\n')
     .some((line) => line.includes('websocket conectado') && line.includes(session.user.id));
   check('A não reconecta depois de sair', !reopened);
 }
 
+async function cleanup() {
+  for (const app of apps) {
+    killApp(app);
+  }
+  stack?.stop();
+  if (tempRoot) {
+    await sleep(500);
+    await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+  }
+}
+
+cleanupOnSignal(cleanup);
 let fatal = null;
 try {
   await main();
@@ -818,31 +981,19 @@ try {
     `\n\x1b[31mInterrompido: ${err instanceof Error ? err.message : String(err)}\x1b[0m`,
   );
 } finally {
-  for (const app of apps) {
-    killApp(app);
-  }
-  if (tempRoot) {
-    await sleep(500);
-    await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
-  }
+  await cleanup();
 }
 
-const failed = results.filter((item) => !item.ok);
-const skipped = results.filter((item) => item.skipped);
-console.log(`\n\x1b[36m=== Resumo ===\x1b[0m`);
-console.log(
-  `${results.length - failed.length - skipped.length} passaram, ${failed.length} falharam, ${skipped.length} não testáveis`,
-);
-for (const item of failed) {
-  console.log(`  FALHOU  ${item.name}`);
-}
+const failures = reporter.summary();
 if (screenshotsDir) {
   console.log(`Capturas em ${screenshotsDir}`);
 }
-for (const app of apps) {
-  const errors = app.log.filter((line) => /error|erro|falha/i.test(line));
-  if (errors.length > 0 && (failed.length > 0 || fatal)) {
-    console.log(`\nLog de ${app.name} (linhas com erro):\n  ${errors.slice(-15).join('\n  ')}`);
+if (failures > 0 || fatal) {
+  for (const app of apps) {
+    const errors = errorLines(app);
+    if (errors.length > 0) {
+      console.log(`\nLog de ${app.name} (linhas com erro):\n  ${errors.join('\n  ')}`);
+    }
   }
 }
-process.exit(failed.length === 0 && !fatal ? 0 : 1);
+process.exit(failures === 0 && !fatal ? 0 : 1);
